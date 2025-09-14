@@ -13,46 +13,74 @@ use Inertia\Response;
 
 class ProfileController extends Controller
 {
-    /**
-     * Show the user's profile settings page.
-     */
+    public function show(Request $request): Response
+    {
+        $user = $request->user();            // <= typed, linter-friendly
+
+        $prefs = [
+            'dietary_goal'  => $user->dietary_goal ?? null,
+            'fitness_goals' => $user->fitness_goals ?: (
+                isset($user->fitness_goal) && $user->fitness_goal !== ''
+                    ? [ (string) $user->fitness_goal ]
+                    : []
+            ),
+            'diet_type'     => $user->diet_type ?? ($user->diet_name ?? null),
+            'diet_other'    => $user->diet_other ?? null,
+            'allergies'     => $user->allergies ?: [],
+        ];
+
+        $displayName = $user->username ?: $user->first_name;
+        $dietName = ($prefs['diet_type'] === 'Other' && $prefs['diet_other'])
+            ? $prefs['diet_other']
+            : ($prefs['diet_type'] ?? '—');
+
+        return Inertia::render('Profile/Show', [   // <= make sure this matches your file path
+            'displayName' => $displayName,
+            'userProfile' => [
+                'first_name' => $user->first_name,
+                'last_name'  => $user->last_name,
+                'username'   => $user->username,
+                'gender'     => $user->gender,
+                'age'        => $user->age,
+                'height_cm'  => $user->height_cm,
+                'weight_kg'  => $user->weight_kg,
+            ],
+            'prefs'       => $prefs,
+            'dietName'    => $dietName,
+        ]);
+    }
+
     public function edit(Request $request): Response
     {
-        return Inertia::render('settings/profile', [
+        // Make sure the component exists at resources/js/Pages/Settings/Profile.tsx
+        return Inertia::render('Settings/Profile', [
             'mustVerifyEmail' => $request->user() instanceof MustVerifyEmail,
             'status' => $request->session()->get('status'),
         ]);
     }
 
-    /**
-     * Update the user's profile settings.
-     */
+    /** Update the user's profile settings. */
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
-        $request->user()->fill($request->validated());
+        $user = $request->user();
+        $user->fill($request->validated());
 
-        if ($request->user()->isDirty('email')) {
-            $request->user()->email_verified_at = null;
+        if ($user->isDirty('email')) {
+            $user->email_verified_at = null;
         }
 
-        $request->user()->save();
+        $user->save();
 
-        return to_route('profile.edit');
+        return to_route('profile.edit');  // <= route exists in routes/web.php above
     }
 
-    /**
-     * Delete the user's account.
-     */
+    /** Delete the user's account. */
     public function destroy(Request $request): RedirectResponse
     {
-        $request->validate([
-            'password' => ['required', 'current_password'],
-        ]);
+        $request->validate(['password' => ['required', 'current_password']]);
 
         $user = $request->user();
-
         Auth::logout();
-
         $user->delete();
 
         $request->session()->invalidate();

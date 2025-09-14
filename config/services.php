@@ -35,4 +35,19 @@ return [
         ],
     ],
 
+'overpass' => [
+    'endpoint'       => env('OVERPASS_ENDPOINT', 'https://overpass-api.de/api/interpreter'),
+    'timeout'        => (int) env('OVERPASS_TIMEOUT', 20),
+    'retries'        => (int) env('OVERPASS_RETRIES', 4),
+    'retry_delay_ms' => (int) env('OVERPASS_RETRY_DELAY_MS', 1800),
+    'cache_ttl'      => (int) env('OVERPASS_CACHE_TTL_SECONDS', 21600),
+
+    // SSL helpers
+    'ca_path'        => env('CURL_CA_BUNDLE', ''),  // e.g. C:\wamp64\bin\php\php8.3.6\extras\ssl\cacert.pem
+    'skip_verify'    => (bool) env('OVERPASS_SKIP_SSL_VERIFY', false),
+
+    'user_agent'     => env('OVERPASS_USER_AGENT', 'Hayetak/1.0 (+contact)'),
+],
+
+
 ];

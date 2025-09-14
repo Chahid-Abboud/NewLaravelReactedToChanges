@@ -2,6 +2,8 @@
 
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
+use App\Http\Middleware\AutoLogoutInactive;
+use App\Http\Middleware\ForbidRememberMe; // ← ensure this import exists
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -10,18 +12,30 @@ use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         web: __DIR__.'/../routes/web.php',
+        api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
+        // 🔑 Run BEFORE Laravel's web stack so the Guard never sees the remember cookie
+        $middleware->web(prepend: [
+            ForbidRememberMe::class,
+        ]);
+
+        // Keep your existing web middleware appended (runs after StartSession/Auth)
         $middleware->web(append: [
             HandleAppearance::class,
             HandleInertiaRequests::class,
             AddLinkHeadersForPreloadedAssets::class,
+            AutoLogoutInactive::class, // your 15-min inactivity timeout
         ]);
+
+        // API stack unchanged
+        $middleware->api();
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //
-    })->create();
+    })
+    ->create();
