@@ -1,262 +1,331 @@
 // resources/js/components/NearbyMap.tsx
+import React, {
+  forwardRef,
+  useEffect,
+  useMemo,
+  useRef,
+  useImperativeHandle,
+} from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { useEffect, useMemo, useRef, useState } from "react";
 import * as turf from "@turf/turf";
+import type { Feature, Polygon, FeatureCollection, Point } from "geojson";
 
 export type PlaceTypesCsv = "gym" | "nutritionist" | "gym,nutritionist";
 
 export type PoiFeature = {
   type: "Feature";
-  geometry: { type: "Point"; coordinates: [number, number] };
+  geometry: { type: "Point"; coordinates: [number, number] }; // [lng, lat]
   properties: {
+    id?: string | number;
     name?: string;
     category?: "gym" | "nutritionist" | string;
-    source?: "foursquare" | "overpass" | string;
+    source?: "foursquare" | "overpass" | "local" | string;
     address?: string | null;
     website?: string | null;
     distance_m?: number | null;
+    _uid?: string; // internal unique id for selection
   };
 };
 
 export type NearbyMapProps = {
-  /** Mapbox public token */
   accessToken: string;
-  /** Controlled radius from parent (meters) */
-  radius: number;
-  /** Controlled types from parent */
+  center?: [number, number]; // [lng, lat] — pass from parent (user location)
+  radius: number;            // meters
   types: PlaceTypesCsv;
-  /** Make the map div fill its parent container */
-  fillHeight?: boolean;
-  /** Optional base URL for Laravel API (useful in dev) */
   apiBaseUrl?: string;
-
-  // Optional callbacks
   onFetchStart?: () => void;
   onFetchError?: (msg?: string) => void;
   onResults?: (features?: PoiFeature[]) => void;
+  className?: string;
+  heightPx?: number;
 };
 
-export default function NearbyMap({
-  accessToken,
-  radius,
-  types,
-  fillHeight = false,
-  apiBaseUrl,
-  onFetchStart,
-  onFetchError,
-  onResults,
-}: NearbyMapProps) {
+// Methods the parent can call (e.g., when a result is clicked)
+export type NearbyMapHandle = {
+  showFeature: (f: PoiFeature) => void;
+  flyTo: (lngLat: [number, number]) => void;
+};
+
+const SOURCE_CIRCLE = "search-circle";
+const LAYER_CIRCLE = "search-circle-fill";
+const SOURCE_POIS = "pois";
+const LAYER_POIS = "pois-layer";
+const LAYER_POIS_SELECTED = "pois-selected";
+const ENDPOINT = "/api/places-local"; // DB endpoint
+
+const GYM_COLOR = "#2563eb";          // blue-600
+const NUTRI_COLOR = "#10b981";        // emerald-500
+const OTHER_COLOR = "#6b7280";        // gray-500
+
+const colorExpression: any = [
+  "match",
+  ["downcase", ["get", "category"]],
+  "gym",
+  GYM_COLOR,
+  "nutritionist",
+  NUTRI_COLOR,
+  OTHER_COLOR,
+];
+
+function ensureUid(features: PoiFeature[]): PoiFeature[] {
+  return (features || []).map((f, i) => {
+    const id = f.properties?.id;
+    const name = f.properties?.name ?? "poi";
+    const [lng, lat] = f.geometry?.coordinates || [0, 0];
+    return {
+      ...f,
+      properties: {
+        ...f.properties,
+        _uid: id != null ? String(id) : `${name}-${lng.toFixed(5)}-${lat.toFixed(5)}-${i}`,
+      },
+    };
+  });
+}
+
+const NearbyMap = forwardRef<NearbyMapHandle, NearbyMapProps>(function NearbyMap(
+  {
+    accessToken,
+    center,
+    radius,
+    types,
+    apiBaseUrl,
+    onFetchStart,
+    onFetchError,
+    onResults,
+    className = "",
+    heightPx = 480,
+  },
+  ref
+) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
-  const [mapLoaded, setMapLoaded] = useState(false);
-  const [user, setUser] = useState<[number, number] | null>(null);
+  const popupRef = useRef<mapboxgl.Popup | null>(null);
+  const featuresRef = useRef<PoiFeature[]>([]);
+  const selectedUidRef = useRef<string | null>(null);
 
-  const baseUrl = useMemo(() => {
-    return (
-      apiBaseUrl ||
-      (import.meta as any)?.env?.VITE_APP_API_BASE ||
-      window.location.origin
-    )
-      .toString()
-      .replace(/\/+$/, "");
-  }, [apiBaseUrl]);
+  // Circle polygon for fit + draw
+  const circlePoly = useMemo<Feature<Polygon> | null>(() => {
+    if (!center) return null;
+    const c = turf.point([center[0], center[1]]);
+    const circle = turf.circle(c, radius / 1000, { steps: 128, units: "kilometers" });
+    return circle as Feature<Polygon>;
+  }, [center, radius]);
 
-  // init map
+  // Expose methods to parent
+  useImperativeHandle(ref, () => ({
+    showFeature: (f: PoiFeature) => {
+      if (!mapRef.current) return;
+      const coords = (f.geometry as Point).coordinates as [number, number];
+      const uid = f.properties?._uid ?? String(f.properties?.id ?? "");
+      selectedUidRef.current = uid || null;
+
+      // Highlight layer filter
+      if (mapRef.current.getLayer(LAYER_POIS_SELECTED)) {
+        mapRef.current.setFilter(LAYER_POIS_SELECTED, ["==", ["get", "_uid"], uid]);
+      }
+
+      // Fly + popup
+      mapRef.current.flyTo({ center: coords, zoom: 14 });
+      showPopup(coords, f);
+    },
+    flyTo: (lngLat: [number, number]) => {
+      mapRef.current?.flyTo({ center: lngLat, zoom: 13 });
+    },
+  }));
+
+  function showPopup(coords: [number, number], f: PoiFeature) {
+    const p = f.properties || {};
+    popupRef.current?.remove();
+    popupRef.current = new mapboxgl.Popup({ offset: 8 })
+      .setLngLat(coords)
+      .setHTML(
+        `<div style="min-width:220px">
+          <div style="font-weight:600">${p.name || "(no name)"}</div>
+          <div style="font-size:12px;opacity:.8">${p.category || ""}${p.source ? ` · ${p.source}` : ""}</div>
+          <div style="font-size:12px;margin-top:4px">${p.address || ""}</div>
+          ${p.website ? `<div style="margin-top:6px"><a href="${p.website}" target="_blank" rel="noreferrer">Website</a></div>` : ""}
+        </div>`
+      )
+      .addTo(mapRef.current!);
+  }
+
+  // Init map once we have a center (user location)
   useEffect(() => {
-    if (!containerRef.current) return;
-    if (!accessToken) {
-      console.warn("Mapbox accessToken missing.");
-      return;
-    }
-    mapboxgl.accessToken = accessToken;
+    if (!accessToken || !center || !containerRef.current) return;
 
+    mapboxgl.accessToken = accessToken;
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: "mapbox://styles/mapbox/streets-v12",
-      center: [35.5018, 33.8938], // Beirut
+      center,
       zoom: 12,
-    });
-    map.addControl(new mapboxgl.NavigationControl({ showCompass: false }));
-    map.once("load", () => {
-      setMapLoaded(true);
-      map.resize();
+      attributionControl: true,
     });
     mapRef.current = map;
 
-    const onWinResize = () => map.resize();
-    window.addEventListener("resize", onWinResize);
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), "top-right");
 
-    // geolocate
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const u: [number, number] = [pos.coords.longitude, pos.coords.latitude];
-        setUser(u);
-        const addMarker = () => {
-          new mapboxgl.Marker().setLngLat(u).addTo(map);
-          map.flyTo({ center: u, zoom: 14, speed: 0.8 });
-          map.resize();
-        };
-        map.isStyleLoaded() ? addMarker() : map.once("load", addMarker);
-      },
-      (err) => console.warn("Geolocation error:", err),
-      { enableHighAccuracy: true, timeout: 8000 }
-    );
+    map.on("load", () => {
+      // Circle
+      if (circlePoly) {
+        map.addSource(SOURCE_CIRCLE, { type: "geojson", data: circlePoly as Feature<Polygon> });
+        map.addLayer({
+          id: LAYER_CIRCLE,
+          type: "fill",
+          source: SOURCE_CIRCLE,
+          paint: { "fill-color": "#1C2C64", "fill-opacity": 0.12 },
+        });
+        const bbox = turf.bbox(circlePoly);
+        map.fitBounds(bbox as mapboxgl.LngLatBoundsLike, { padding: 40, duration: 500 });
+      }
 
-    // if style reloads, redraw radius
-    const onStyleData = () => {
-      if (!map.isStyleLoaded() || !user) return;
-      drawRadius(map, user, radius);
-    };
-    map.on("styledata", onStyleData);
+      // POIs source + layers
+      map.addSource(SOURCE_POIS, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] } as FeatureCollection,
+      });
+
+      // Main layer (colored by category)
+      map.addLayer({
+        id: LAYER_POIS,
+        type: "circle",
+        source: SOURCE_POIS,
+        paint: {
+          "circle-radius": 6,
+          "circle-color": colorExpression,
+          "circle-stroke-width": 1,
+          "circle-stroke-color": "#ffffff",
+        },
+      });
+
+      // Selected marker layer (bigger ring)
+      map.addLayer({
+        id: LAYER_POIS_SELECTED,
+        type: "circle",
+        source: SOURCE_POIS,
+        filter: ["==", ["get", "_uid"], ""], // none at start
+        paint: {
+          "circle-radius": 10,
+          "circle-color": colorExpression,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": "#111827",
+        },
+      });
+
+      // Click handler → popup + highlight
+      map.on("click", LAYER_POIS, (e) => {
+        const feat = e.features?.[0] as any;
+        if (!feat) return;
+        const coords = feat.geometry?.coordinates as [number, number];
+        const props = feat.properties || {};
+        selectedUidRef.current = String(props._uid ?? "");
+        map.setFilter(LAYER_POIS_SELECTED, ["==", ["get", "_uid"], selectedUidRef.current]);
+        showPopup(coords, {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: coords },
+          properties: props,
+        } as PoiFeature);
+      });
+
+      void fetchPois();
+    });
 
     return () => {
-      window.removeEventListener("resize", onWinResize);
-      map.off("styledata", onStyleData);
-      try {
-        if (map.getLayer("pois")) map.removeLayer("pois");
-        if (map.getSource("pois")) map.removeSource("pois");
-        if (map.getLayer("radius-fill")) map.removeLayer("radius-fill");
-        if (map.getLayer("radius-outline")) map.removeLayer("radius-outline");
-        if (map.getSource("radius")) map.removeSource("radius");
-      } catch {}
+      popupRef.current?.remove();
       map.remove();
+      mapRef.current = null;
     };
-  }, [accessToken, radius]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, center]);
 
-  // react to radius/types when ready
+  // Update circle + refetch when center/radius/types change
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapLoaded || !user) return;
-    drawRadius(map, user, radius);
-    void fetchPois(map, baseUrl, user, radius, types, { onFetchStart, onFetchError, onResults });
-  }, [mapLoaded, user, radius, types, baseUrl, onFetchStart, onFetchError, onResults]);
+    if (!map || !map.isStyleLoaded() || !circlePoly) return;
+    (map.getSource(SOURCE_CIRCLE) as mapboxgl.GeoJSONSource | undefined)?.setData(
+      circlePoly as Feature<Polygon>
+    );
+    try {
+      const bbox = turf.bbox(circlePoly);
+      map.fitBounds(bbox as mapboxgl.LngLatBoundsLike, { padding: 40, duration: 350 });
+    } catch {}
+    // re-fetch on center/radius change
+    void fetchPois();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [circlePoly, types]);
 
+  async function fetchPois() {
+    const map = mapRef.current;
+    if (!map || !center) return;
+
+    try {
+      onFetchStart?.();
+
+      const baseUrl = apiBaseUrl ?? window.location.origin;
+      const url = new URL(ENDPOINT, baseUrl);
+      url.searchParams.set("lat", String(center[1]));
+      url.searchParams.set("lng", String(center[0]));
+      url.searchParams.set("radius", String(radius));
+      url.searchParams.set("types", types);
+
+      const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+
+      // Normalize + ensure _uid
+      const features = ensureUid((data?.features ?? data?.data ?? []) as PoiFeature[]);
+      featuresRef.current = features;
+
+      (map.getSource(SOURCE_POIS) as mapboxgl.GeoJSONSource | undefined)?.setData({
+        type: "FeatureCollection",
+        features,
+      } as FeatureCollection);
+
+      onResults?.(features);
+    } catch (e: any) {
+      onFetchError?.(e?.message || "Failed to load POIs");
+    }
+  }
+
+  // Legend overlay
   return (
-    <div
-      ref={containerRef}
-      style={{ width: "100%", height: fillHeight ? "100%" : 480 }}
-    />
+    <div className={className} style={{ position: "relative" }}>
+      <div
+        ref={containerRef}
+        style={{ width: "100%", height: `${heightPx}px`, borderRadius: 12, overflow: "hidden" }}
+        aria-label="Nearby map"
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: 10,
+          left: 10,
+          background: "rgba(255,255,255,0.9)",
+          border: "1px solid rgba(0,0,0,0.1)",
+          borderRadius: 8,
+          padding: "6px 8px",
+          fontSize: 12,
+          display: "flex",
+          gap: 10,
+          alignItems: "center",
+        }}
+      >
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: "50%", background: GYM_COLOR, display: "inline-block"
+          }} />
+          gym
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{
+            width: 10, height: 10, borderRadius: "50%", background: NUTRI_COLOR, display: "inline-block"
+          }} />
+          nutritionist
+        </span>
+      </div>
+    </div>
   );
-}
+});
 
-/* ---------- utils ---------- */
-function drawRadius(map: mapboxgl.Map, center: [number, number], radiusMeters: number) {
-  if (!map.isStyleLoaded()) {
-    map.once("load", () => drawRadius(map, center, radiusMeters));
-    return;
-  }
-  const circle = turf.circle(center, radiusMeters / 1000, { steps: 64, units: "kilometers" }) as any;
-
-  const src = map.getSource("radius") as mapboxgl.GeoJSONSource | undefined;
-  if (!src) {
-    map.addSource("radius", { type: "geojson", data: circle });
-  } else {
-    src.setData(circle);
-  }
-  if (!map.getLayer("radius-fill")) {
-    map.addLayer({
-      id: "radius-fill",
-      type: "fill",
-      source: "radius",
-      paint: { "fill-opacity": 0.15, "fill-color": "#1C2C64" },
-    });
-  }
-  if (!map.getLayer("radius-outline")) {
-    map.addLayer({
-      id: "radius-outline",
-      type: "line",
-      source: "radius",
-      paint: { "line-width": 2, "line-color": "#1C2C64" },
-    });
-  }
-}
-
-async function fetchPois(
-  map: mapboxgl.Map,
-  baseUrl: string,
-  user: [number, number],
-  radius: number,
-  types: string,
-  cb: {
-    onFetchStart?: () => void;
-    onFetchError?: (msg?: string) => void;
-    onResults?: (features?: PoiFeature[]) => void;
-  }
-) {
-  if (!map.isStyleLoaded()) {
-    map.once("load", () => fetchPois(map, baseUrl, user, radius, types, cb));
-    return;
-  }
-
-  cb.onFetchStart?.();
-
-  const url = new URL("/api/places", baseUrl);
-  url.searchParams.set("lat", String(user[1]));
-  url.searchParams.set("lng", String(user[0]));
-  url.searchParams.set("radius", String(radius));
-  url.searchParams.set("types", types);
-
-  try {
-    const res = await fetch(url.toString(), { credentials: "include" });
-    if (!res.ok) {
-      cb.onFetchError?.(`HTTP ${res.status}`);
-      return;
-    }
-    const fc = (await res.json()) as { features?: PoiFeature[] };
-    const raw = fc.features ?? [];
-
-    const inside = raw
-      .filter((f) => {
-        const coords = f?.geometry?.coordinates;
-        if (!coords) return false;
-        const dKm = turf.distance(turf.point(user), turf.point(coords), { units: "kilometers" });
-        return dKm * 1000 <= radius;
-      })
-      .map((f) => {
-        const dKm = turf.distance(turf.point(user), turf.point(f.geometry.coordinates), { units: "kilometers" });
-        return {
-          ...f,
-          properties: { ...f.properties, distance_m: Math.round(dKm * 1000) },
-        };
-      });
-
-    const collection = { type: "FeatureCollection", features: inside } as GeoJSON.FeatureCollection;
-
-    const src = map.getSource("pois") as mapboxgl.GeoJSONSource | undefined;
-    if (!src) {
-      map.addSource("pois", { type: "geojson", data: collection });
-      map.addLayer({
-        id: "pois",
-        type: "circle",
-        source: "pois",
-        paint: { "circle-radius": 6, "circle-stroke-width": 1, "circle-stroke-color": "#FFFFFF" },
-      });
-
-      map.on("click", "pois", (e) => {
-        const f = e.features?.[0] as any;
-        if (!f) return;
-        const [lng, lat] = f.geometry.coordinates;
-        const name = f.properties?.name ?? "Place";
-        const srcName = f.properties?.source ?? "source";
-        new mapboxgl.Popup()
-          .setLngLat([lng, lat])
-          .setHTML(`<strong>${escapeHtml(name)}</strong><br/><small>${escapeHtml(srcName)}</small>`)
-          .addTo(map);
-      });
-
-      map.on("mouseenter", "pois", () => (map.getCanvas().style.cursor = "pointer"));
-      map.on("mouseleave", "pois", () => (map.getCanvas().style.cursor = ""));
-    } else {
-      src.setData(collection as any);
-    }
-
-    cb.onResults?.(inside as PoiFeature[]);
-  } catch (err: any) {
-    cb.onFetchError?.(err?.message || "Failed to load POIs");
-  }
-}
-
-function escapeHtml(s: string) {
-  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[c]!));
-}
+export default NearbyMap;

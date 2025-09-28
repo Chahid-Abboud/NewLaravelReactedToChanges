@@ -15,145 +15,230 @@ use Illuminate\Validation\Rule;
 
 class TrackMealsController extends Controller
 {
+    /**
+     * Meal Tracker (daily view)
+     */
     public function index(Request $request)
     {
         $user = Auth::user();
 
-        // Find active diet (if any)
-        $activeDietId = UserDiet::query()
-            ->where('user_id', $user->id)
-            ->where(function ($q) {
-                $q->whereNull('active_to')->orWhere('active_to', '>=', now()->toDateString());
-            })
-            ->orderByDesc('active_from')
-            ->value('diet_id');
-
-        $diet = null;
-        if ($activeDietId) {
-            $diet = Diet::with('items')
-                ->where('id', $activeDietId)
-                ->where('user_id', $user->id)
-                ->first();
+        // Resolve date (?date=YYYY-MM-DD) default today
+        $date = $request->query('date');
+        try {
+            $date = $date ? (new \Carbon\Carbon($date))->toDateString() : now()->toDateString();
+        } catch (\Throwable $e) {
+            $date = now()->toDateString();
         }
 
-        return Inertia::render('TrackMeals/TrackMeals', [
-            'diet' => $diet ? [
-                'id' => $diet->id,
-                'name' => $diet->name,
-                'items' => $diet->items->map(fn($i) => [
-                    'id' => $i->id,
-                    'category' => $i->category,
-                    'label' => $i->label,
-                    'default_portion' => $i->default_portion,
-                    'calories' => $i->calories,
-                ])->values(),
-            ] : null,
-            'today' => now()->toDateString(),
+        // Load entries & totals
+        [$entries, $mealTotals, $dailyTotals] = $this->loadEntriesAndTotals($user->id, $date);
+
+        // Compute recommended targets for progress bars
+        $rawTargets = $this->computeTargetsForUser($user);
+        $targets    = $this->sanitizeTargets($rawTargets);
+
+        return Inertia::render('MealTracker', [
+            'date'        => $date,
+            'entries'     => $entries,
+            'mealTotals'  => $mealTotals,
+            'dailyTotals' => $dailyTotals,
+            'targets'     => $targets, // always numeric and >0
         ]);
     }
 
-    // Save/replace the user’s diet template
-    public function storeDiet(Request $request)
+    /**
+     * Load entries/totals from MealEntry+Food if present, else MealLog fallback
+     */
+    protected function loadEntriesAndTotals(int $userId, string $date): array
     {
-        $user = Auth::user();
+        $useMealEntry = class_exists(\App\Models\MealEntry::class) && class_exists(\App\Models\Food::class);
 
-        $validated = $request->validate([
-            'name' => ['required','string','max:120'],
-            'items' => ['array'],
-            'items.*.category' => ['required', Rule::in(['breakfast','lunch','dinner','snack','drink'])],
-            'items.*.label' => ['required','string','max:255'],
-            'items.*.default_portion' => ['nullable','string','max:120'],
-            'items.*.calories' => ['nullable','integer','min:0'],
-        ]);
+        if ($useMealEntry) {
+            $MealEntry = app(\App\Models\MealEntry::class);
 
-        // Create/replace diet
-        $diet = Diet::create([
-            'user_id' => $user->id,
-            'name'    => $validated['name'],
-        ]);
+            $rows = $MealEntry::with(['food'])
+                ->where('user_id', $userId)
+                ->whereDate('eaten_at', $date)
+                ->orderBy('id')
+                ->get();
 
-        $bulk = [];
-        foreach ($validated['items'] ?? [] as $row) {
-            $bulk[] = [
-                'diet_id' => $diet->id,
-                'category' => $row['category'],
-                'label' => $row['label'],
-                'default_portion' => $row['default_portion'] ?? null,
-                'calories' => $row['calories'] ?? null,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
-        }
-        if ($bulk) {
-            DietItem::insert($bulk);
-        }
+            $entries = [];
+            $mealTotals = $this->blankMealTotals();
+            foreach ($rows as $row) {
+                $food = $row->food;
+                if (!$food) continue;
 
-        // Mark as active
-        UserDiet::create([
-            'user_id' => $user->id,
-            'diet_id' => $diet->id,
-            'active_from' => now()->toDateString(),
-        ]);
+                $one = [
+                    'id'        => (int)$row->id,
+                    'meal_type' => (string)$row->meal_type,
+                    'servings'  => (float)$row->servings,
+                    'eaten_at'  => (string)$row->eaten_at,
+                    'food'      => [
+                        'id'           => (int)$food->id,
+                        'name'         => (string)$food->name,
+                        'serving_unit' => (string)($food->serving_unit ?? 'g'),
+                        'serving_size' => (float)($food->serving_size ?? 100),
+                        'calories'     => (float)($food->calories ?? $food->calories_kcal ?? 0),
+                        'protein'      => (float)($food->protein ?? $food->protein_g ?? 0),
+                        'carbs'        => (float)($food->carbs ?? $food->carbs_g ?? 0),
+                        'fat'          => (float)($food->fat ?? $food->fat_g ?? 0),
+                    ],
+                ];
+                $entries[] = $one;
 
-        return back()->with('success', 'Diet saved.');
-    }
-
-    // Log what user ate for a day (with optional "Other" + photo)
-    public function storeLog(Request $request)
-    {
-        $user = Auth::user();
-
-        $validated = $request->validate([
-            'consumed_at' => ['required','date'],
-            'other_notes' => ['nullable','string','max:2000'],
-            'photo' => ['nullable','image','mimes:jpg,jpeg,png,webp','max:5120'],
-            'selections' => ['array'], // [{category,label,quantity,unit,calories}]
-            'selections.*.category' => [Rule::in(['breakfast','lunch','dinner','snack','drink'])],
-            'selections.*.label' => ['required','string','max:255'],
-            'selections.*.quantity' => ['nullable','numeric','min:0'],
-            'selections.*.unit' => ['nullable','string','max:50'],
-            'selections.*.calories' => ['nullable','integer','min:0'],
-        ]);
-
-        // Either create or update same-day log
-        $log = MealLog::firstOrCreate(
-            ['user_id' => $user->id, 'consumed_at' => $validated['consumed_at']],
-            ['other_notes' => $validated['other_notes'] ?? null]
-        );
-
-        // Handle photo upload
-        if ($request->hasFile('photo')) {
-            $path = $request->file('photo')->store('meal-photos', 'public');
-            // delete old photo if replacing
-            if ($log->photo_path && $log->photo_path !== $path) {
-                Storage::disk('public')->delete($log->photo_path);
+                $this->accumulateTotals($mealTotals[$one['meal_type']], $one);
             }
-            $log->photo_path = $path;
+
+            $dailyTotals = $this->sumMealTotals($mealTotals);
+            return [$entries, $mealTotals, $dailyTotals];
         }
 
-        $log->other_notes = $validated['other_notes'] ?? null;
-        $log->save();
+        // Fallback: MealLog + MealLogItem
+        $log = MealLog::with('items')
+            ->where('user_id', $userId)
+            ->whereDate('consumed_at', $date)
+            ->first();
 
-        // Replace items for that day
-        $log->items()->delete();
+        $entries = [];
+        $mealTotals = $this->blankMealTotals();
 
-        $bulk = [];
-        foreach ($validated['selections'] ?? [] as $sel) {
-            $bulk[] = [
-                'meal_log_id' => $log->id,
-                'category' => $sel['category'],
-                'label' => $sel['label'],
-                'quantity' => $sel['quantity'] ?? null,
-                'unit' => $sel['unit'] ?? null,
-                'calories' => $sel['calories'] ?? null,
-                'created_at' => now(),
-                'updated_at' => now(),
-            ];
+        if ($log) {
+            foreach ($log->items as $item) {
+                $one = [
+                    'id'        => (int)$item->id,
+                    'meal_type' => (string)$item->category,
+                    'servings'  => 1.0,
+                    'eaten_at'  => (string)$log->consumed_at,
+                    'food'      => [
+                        'id'           => 0,
+                        'name'         => (string)$item->label,
+                        'serving_unit' => 'g',
+                        'serving_size' => 100.0,
+                        'calories'     => (float)($item->calories ?? 0),
+                        'protein'      => 0.0,
+                        'carbs'        => 0.0,
+                        'fat'          => 0.0,
+                    ],
+                ];
+                $entries[] = $one;
+
+                $this->accumulateTotals($mealTotals[$one['meal_type']], $one);
+            }
         }
-        if ($bulk) {
-            MealLogItem::insert($bulk);
+
+        $dailyTotals = $this->sumMealTotals($mealTotals);
+        return [$entries, $mealTotals, $dailyTotals];
+    }
+
+    protected function blankMealTotals(): array
+    {
+        $zero = fn() => ['calories' => 0.0, 'protein' => 0.0, 'carbs' => 0.0, 'fat' => 0.0];
+        return [
+            'breakfast' => $zero(),
+            'lunch'     => $zero(),
+            'dinner'    => $zero(),
+            'snack'     => $zero(),
+            'drink'     => $zero(),
+        ];
+    }
+
+    protected function sumMealTotals(array $mealTotals): array
+    {
+        $daily = ['calories' => 0.0, 'protein' => 0.0, 'carbs' => 0.0, 'fat' => 0.0];
+        foreach ($mealTotals as $t) {
+            $daily['calories'] += $t['calories'];
+            $daily['protein']  += $t['protein'];
+            $daily['carbs']    += $t['carbs'];
+            $daily['fat']      += $t['fat'];
+        }
+        return $this->roundTotals($daily);
+    }
+
+    protected function accumulateTotals(array &$bucket, array $entry): void
+    {
+        $servings = (float)$entry['servings'];
+        $f = $entry['food'];
+
+        $bucket['calories'] += ($f['calories'] ?? 0) * $servings;
+        $bucket['protein']  += ($f['protein']  ?? 0) * $servings;
+        $bucket['carbs']    += ($f['carbs']    ?? 0) * $servings;
+        $bucket['fat']      += ($f['fat']      ?? 0) * $servings;
+
+        $bucket = $this->roundTotals($bucket);
+    }
+
+    protected function roundTotals(array $t): array
+    {
+        return [
+            'calories' => (int) round($t['calories'] ?? 0),
+            'protein'  => (int) round($t['protein'] ?? 0),
+            'carbs'    => (int) round($t['carbs'] ?? 0),
+            'fat'      => (int) round($t['fat'] ?? 0),
+        ];
+    }
+
+    /**
+     * Ensure targets are always >0, fallback if needed
+     */
+    protected function sanitizeTargets(array $t): array
+    {
+        $fallback = ['calories'=>2000,'protein'=>120,'carbs'=>220,'fat'=>70];
+        $out = [];
+        foreach ($fallback as $k => $def) {
+            $v = isset($t[$k]) ? (int) round((float) $t[$k]) : 0;
+            $out[$k] = $v > 0 ? $v : $def;
+        }
+        return $out;
+    }
+
+    /**
+     * Compute targets based on user profile & goal
+     */
+    protected function computeTargetsForUser($user): array
+    {
+        $age   = (int)($user->age ?? 25);
+        $sex   = strtolower((string)($user->gender ?? 'm'));
+        $ht    = (float)($user->height_cm ?? 175);
+        $wt    = (float)($user->weight_kg ?? 75);
+
+        $bmr = ($sex === 'f')
+            ? 10 * $wt + 6.25 * $ht - 5 * $age - 161
+            : 10 * $wt + 6.25 * $ht - 5 * $age + 5;
+
+        $tdee = $bmr * 1.4;
+
+        $goal = null;
+        if (class_exists(\App\Models\UserPref::class)) {
+            $pref = \App\Models\UserPref::where('user_id', $user->id)->first();
+            $goal = $pref->dietary_goal ?? null;
         }
 
-        return back()->with('success', 'Your meals for the day were logged.');
+        $calories = $tdee;
+        if ($goal) {
+            $g = strtolower((string)$goal);
+            if (str_contains($g, 'loss'))   $calories = $tdee * 0.85;
+            if (str_contains($g, 'gain') || str_contains($g, 'muscle')) $calories = $tdee * 1.10;
+        }
+
+        $proteinPerKg = 1.6;
+        if ($goal) {
+            $g = strtolower((string)$goal);
+            if (str_contains($g, 'loss'))   $proteinPerKg = 1.8;
+            if (str_contains($g, 'muscle')) $proteinPerKg = 2.0;
+        }
+        $proteinG = $wt * $proteinPerKg;
+
+        $fatKcal = $calories * 0.25;
+        $fatG    = $fatKcal / 9;
+
+        $carbKcal = max(0, $calories - ($proteinG * 4 + $fatG * 9));
+        $carbG    = $carbKcal / 4;
+
+        return [
+            'calories' => (int) round($calories),
+            'protein'  => (int) round($proteinG),
+            'carbs'    => (int) round($carbG),
+            'fat'      => (int) round($fatG),
+        ];
     }
 }

@@ -1,3 +1,4 @@
+// resources/js/pages/MealTracker.tsx
 import { Head, usePage } from "@inertiajs/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
@@ -16,24 +17,45 @@ type EntryItem = {
     calories: number; protein: number; carbs: number; fat: number;
   };
 };
+type Targets = Partial<Totals>;
+
 type PageProps = {
   date: string;
   dailyTotals: Totals;
   mealTotals: MealTotals;
   entries: EntryItem[];
+  targets?: Targets;
+};
+
+type SearchFood = {
+  id: number;
+  name: string;
+  serving_unit: "g" | "ml";
+  serving_size: number;
+  calories?: number; calories_kcal?: number;
+  protein?: number; protein_g?: number;
+  carbs?: number; carbs_g?: number;
+  fat?: number; fat_g?: number;
 };
 
 /** ---------- Page ---------- */
 export default function MealTracker() {
-  const { date, dailyTotals, mealTotals, entries } = usePage<PageProps>().props;
+  const { date, dailyTotals, mealTotals, entries, targets } = usePage<PageProps>().props;
 
   const [category, setCategory] = useState<"breakfast"|"lunch"|"dinner"|"snack"|"drink">("breakfast");
   const [q, setQ] = useState("");
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<SearchFood[]>([]);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
 
-  // useRef must have an initial value
+  // Add dialog state (portions vs grams)
+  const [openAdd, setOpenAdd] = useState(false);
+  const [selected, setSelected] = useState<SearchFood | null>(null);
+  const [addMode, setAddMode] = useState<"portion" | "grams">("portion");
+  const [portionCount, setPortionCount] = useState<number>(1);
+  const [gramsValue, setGramsValue] = useState<number | "">("");
+
+  // debounce
   const debounceRef = useRef<number | null>(null);
 
   // search
@@ -56,29 +78,6 @@ export default function MealTracker() {
     };
   }, [category, q, page]);
 
-  // quick add
-  const addItem = async (food: any) => {
-    const raw = window.prompt(
-      `Amount in ${food.serving_unit} (base ${food.serving_size}${food.serving_unit}):`,
-      "100"
-    );
-    if (!raw) return;
-    const amount = Number(raw);
-    if (!(amount > 0)) return;
-
-    const servings = amount / food.serving_size;
-
-    await axios.post("/meal-entries", {
-      food_id: food.id,
-      meal_type: category,
-      servings,
-      eaten_at: date,
-    });
-
-    window.location.reload();
-  };
-
-  const macro = (n: number) => Math.round(n);
   const title = useMemo(() => "Meal Tracker", []);
 
   // date navigation
@@ -86,6 +85,73 @@ export default function MealTracker() {
     const sep = window.location.pathname.includes("?") ? "&" : "?";
     window.location.href = `/meal-tracker${sep}date=${target}`;
   };
+
+  // ---------- Add flow ----------
+  const openAddDialog = (food: SearchFood) => {
+    setSelected(food);
+    setAddMode("portion");
+    setPortionCount(1);
+    setGramsValue("");
+    setOpenAdd(true);
+  };
+
+  const closeAddDialog = () => {
+    setOpenAdd(false);
+    setSelected(null);
+  };
+
+  const norm = (v?: number, alt?: number) => Math.max(0, Math.round((v ?? alt ?? 0) as number));
+  const toBaseMacros = (f: SearchFood) => {
+    const calories = norm(f.calories, f.calories_kcal);
+    const protein = norm(f.protein, f.protein_g);
+    const carbs   = norm(f.carbs, f.carbs_g);
+    const fat     = norm(f.fat, f.fat_g);
+    return { calories, protein, carbs, fat };
+  };
+
+  const computeServings = (): number => {
+    if (!selected) return 0;
+    if (addMode === "portion") {
+      const p = Number(portionCount);
+      return p > 0 ? p : 0;
+    } else {
+      const g = Number(gramsValue);
+      const base = selected.serving_size || 100;
+      return g > 0 && base > 0 ? g / base : 0;
+    }
+  };
+
+  const computedPreview = () => {
+    if (!selected) return { calories: 0, protein: 0, carbs: 0, fat: 0, grams: 0 };
+    const servings = computeServings();
+    const base = toBaseMacros(selected);
+    const grams = servings * selected.serving_size;
+    return {
+      calories: Math.round(base.calories * servings),
+      protein: Math.round(base.protein * servings),
+      carbs: Math.round(base.carbs * servings),
+      fat: Math.round(base.fat * servings),
+      grams: Math.round(grams),
+    };
+  };
+
+  const confirmAdd = async () => {
+    if (!selected) return;
+    const servings = computeServings();
+    if (!(servings > 0)) return;
+
+    await axios.post("/meal-entries", {
+      food_id: selected.id,
+      meal_type: category,
+      servings,
+      eaten_at: date,
+    });
+
+    closeAddDialog();
+    window.location.reload();
+  };
+
+  const macro = (n: number) => Math.round(n);
 
   return (
     <>
@@ -126,15 +192,40 @@ export default function MealTracker() {
           </div>
         </div>
 
-        {/* Today totals */}
+        {/* Stat cards WITH embedded progress bars */}
         <section aria-labelledby="totals" className="mb-6">
           <h2 id="totals" className="sr-only">Daily totals</h2>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard label="Calories" value={`${macro(dailyTotals.calories)} kcal`} />
-            <StatCard label="Protein"  value={`${macro(dailyTotals.protein)} g`} />
-            <StatCard label="Carbs"    value={`${macro(dailyTotals.carbs)} g`} />
-            <StatCard label="Fat"      value={`${macro(dailyTotals.fat)} g`} />
+            <StatCard
+              label="Calories"
+              value={`${macro(dailyTotals.calories)} kcal`}
+              unit="kcal"
+              consumed={dailyTotals.calories}
+              target={targets?.calories}
+            />
+            <StatCard
+              label="Protein"
+              value={`${macro(dailyTotals.protein)} g`}
+              unit="g"
+              consumed={dailyTotals.protein}
+              target={targets?.protein}
+            />
+            <StatCard
+              label="Carbs"
+              value={`${macro(dailyTotals.carbs)} g`}
+              unit="g"
+              consumed={dailyTotals.carbs}
+              target={targets?.carbs}
+            />
+            <StatCard
+              label="Fat"
+              value={`${macro(dailyTotals.fat)} g`}
+              unit="g"
+              consumed={dailyTotals.fat}
+              target={targets?.fat}
+            />
           </div>
+          
         </section>
 
         {/* Meal type tabs */}
@@ -142,17 +233,17 @@ export default function MealTracker() {
           <h2 id="meals" className="sr-only">Per-meal totals</h2>
           <div role="tablist" aria-label="Meal Types" className="grid grid-cols-1 gap-3 md:grid-cols-5">
             {(["breakfast","lunch","dinner","snack","drink"] as const).map((mt) => {
-              const selected = mt === category;
+              const selectedTab = mt === category;
               return (
                 <button
                   key={mt}
                   role="tab"
-                  aria-selected={selected}
+                  aria-selected={selectedTab}
                   aria-controls={`panel-${mt}`}
                   id={`tab-${mt}`}
                   onClick={() => setCategory(mt)}
                   className={`rounded-xl border p-3 text-left transition ${
-                    selected
+                    selectedTab
                       ? "border-[#1C2C64] ring-1 ring-[#1C2C64]"
                       : "border-[#1C2C64]/20 hover:bg-[#1C2C64]/5"
                   }`}
@@ -167,7 +258,7 @@ export default function MealTracker() {
           </div>
         </section>
 
-        {/* Search (fixed single aria-labelledby) */}
+        {/* Search */}
         <section
           id={`panel-${category}`}
           role="tabpanel"
@@ -207,19 +298,19 @@ export default function MealTracker() {
               {results.map((f) => {
                 const base = `${f.serving_size}${f.serving_unit}`;
                 const kcal = Math.round(f.calories_kcal ?? f.calories ?? 0);
-                const p = Math.round(f.protein_g ?? f.protein ?? 0);
-                const c = Math.round(f.carbs_g ?? f.carbs ?? 0);
-                const fat = Math.round(f.fat_g ?? f.fat ?? 0);
+                const p = Math.round((f.protein_g ?? f.protein ?? 0) as number);
+                const c = Math.round((f.carbs_g   ?? f.carbs   ?? 0) as number);
+                const fat = Math.round((f.fat_g     ?? f.fat     ?? 0) as number);
                 return (
                   <li key={f.id} className="flex items-center justify-between py-2">
                     <div>
                       <div className="font-medium text-[#1C2C64]">{f.name}</div>
                       <div className="text-xs text-[#1C2C64]/80">
-                        base {base} · {kcal} kcal · P {p} · C {c} · F {fat}
+                        per {base} · {kcal} kcal · P {p} · C {c} · F {fat}
                       </div>
                     </div>
                     <button
-                      onClick={() => addItem(f)}
+                      onClick={() => openAddDialog(f)}
                       className="rounded-lg border border-[#1C2C64]/20 px-3 py-1.5 text-sm text-[#1C2C64] hover:bg-[#1C2C64]/5"
                     >
                       Add
@@ -232,7 +323,7 @@ export default function MealTracker() {
               )}
             </ul>
 
-            {/* Simple paging controls (server must support ?page=) */}
+            {/* Simple paging controls */}
             <div className="flex items-center justify-between pt-2">
               <button
                 disabled={page <= 1}
@@ -259,32 +350,36 @@ export default function MealTracker() {
           </div>
           <div className="p-3">
             <ul className="divide-y divide-[#1C2C64]/10">
-              {entries.map((e) => (
-                <li key={e.id} className="flex items-center justify-between py-2">
-                  <div>
-                    <div className="font-medium text-[#1C2C64]">
-                      <span className="capitalize">{e.meal_type}</span> · {e.food.name}
+              {entries.map((e) => {
+                const approxGrams = Math.round(e.servings * e.food.serving_size);
+                const portions = Number.isInteger(e.servings) ? e.servings : Math.round(e.servings * 10) / 10;
+                return (
+                  <li key={e.id} className="flex items-center justify-between py-2">
+                    <div>
+                      <div className="font-medium text-[#1C2C64]">
+                        <span className="capitalize">{e.meal_type}</span> · {e.food.name}
+                      </div>
+                      <div className="text-xs text-[#1C2C64]/80">
+                        {portions} portion{portions === 1 ? "" : "s"} (~{approxGrams}{e.food.serving_unit}) ·
+                        {` ${Math.round(e.food.calories)} kcal · P ${Math.round(e.food.protein)} · C ${Math.round(e.food.carbs)} · F ${Math.round(e.food.fat)}`}
+                      </div>
                     </div>
-                    <div className="text-xs text-[#1C2C64]/80">
-                      {Math.round(e.servings * e.food.serving_size)}{e.food.serving_unit} ·
-                      {` ${Math.round(e.food.calories)} kcal · P ${Math.round(e.food.protein)} · C ${Math.round(e.food.carbs)} · F ${Math.round(e.food.fat)}`}
-                    </div>
-                  </div>
-                  <form
-                    method="post"
-                    action={`/meal-entries/${e.id}`}
-                    onSubmit={(ev) => { if (!confirm("Remove entry?")) ev.preventDefault(); }}
-                  >
-                    <input type="hidden" name="_method" value="delete" />
-                    <input
-                      type="hidden"
-                      name="_token"
-                      value={(document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || ""}
-                    />
-                    <button className="text-sm text-red-600 hover:underline">Remove</button>
-                  </form>
-                </li>
-              ))}
+                    <form
+                      method="post"
+                      action={`/meal-entries/${e.id}`}
+                      onSubmit={(ev) => { if (!confirm("Remove entry?")) ev.preventDefault(); }}
+                    >
+                      <input type="hidden" name="_method" value="delete" />
+                      <input
+                        type="hidden"
+                        name="_token"
+                        value={(document.querySelector('meta[name="csrf-token"]') as HTMLMetaElement)?.content || ""}
+                      />
+                      <button className="text-sm text-red-600 hover:underline">Remove</button>
+                    </form>
+                  </li>
+                );
+              })}
               {entries.length === 0 && (
                 <li className="py-4 text-sm text-[#1C2C64]/70">Nothing yet for today.</li>
               )}
@@ -292,16 +387,182 @@ export default function MealTracker() {
           </div>
         </section>
       </main>
+
+      {/* ---------- Add Dialog (portions or grams) ---------- */}
+      {openAdd && selected && (
+        <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* backdrop */}
+          <div className="absolute inset-0 bg-black/30" onClick={closeAddDialog} />
+          {/* card */}
+          <div className="relative z-10 w-full max-w-md rounded-2xl border border-[#1C2C64]/20 bg-white p-4 shadow-xl">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-sm font-medium text-[#1C2C64]">
+                Add to <span className="capitalize">{category}</span>
+              </div>
+              <button
+                onClick={closeAddDialog}
+                className="rounded-lg border border-[#1C2C64]/20 px-2 py-1 text-xs text-[#1C2C64]"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mb-2">
+              <div className="font-semibold text-[#1C2C64]">{selected.name}</div>
+              <div className="text-xs text-[#1C2C64]/70">
+                Base: {selected.serving_size}{selected.serving_unit}
+              </div>
+            </div>
+
+            {/* mode switch */}
+            <div className="mb-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setAddMode("portion")}
+                className={`rounded-lg border px-3 py-1.5 text-sm ${
+                  addMode === "portion" ? "border-[#1C2C64] ring-1 ring-[#1C2C64]" : "border-[#1C2C64]/20"
+                }`}
+              >
+                Portions
+              </button>
+              <button
+                type="button"
+                onClick={() => setAddMode("grams")}
+                className={`rounded-lg border px-3 py-1.5 text-sm ${
+                  addMode === "grams" ? "border-[#1C2C64] ring-1 ring-[#1C2C64]" : "border-[#1C2C64]/20"
+                }`}
+              >
+                Grams / mL
+              </button>
+            </div>
+
+            {/* inputs */}
+            {addMode === "portion" ? (
+              <div className="mb-3">
+                <label className="block text-sm text-[#1C2C64]" htmlFor="portionCount">
+                  Portions (1 portion = {selected.serving_size}{selected.serving_unit})
+                </label>
+                <input
+                  id="portionCount"
+                  type="number"
+                  min={0.25}
+                  step={0.25}
+                  value={portionCount}
+                  onChange={(e) => setPortionCount(Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border border-[#1C2C64]/20 px-3 py-2 outline-none focus:ring-2 focus:ring-[#1C2C64]/40"
+                />
+              </div>
+            ) : (
+              <div className="mb-3">
+                <label className="block text-sm text-[#1C2C64]" htmlFor="gramsValue">
+                  Amount in {selected.serving_unit}
+                </label>
+                <input
+                  id="gramsValue"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={gramsValue}
+                  onChange={(e) => setGramsValue(e.target.value === "" ? "" : Number(e.target.value))}
+                  className="mt-1 w-full rounded-lg border border-[#1C2C64]/20 px-3 py-2 outline-none focus:ring-2 focus:ring-[#1C2C64]/40"
+                />
+              </div>
+            )}
+
+            {/* preview */}
+            <div className="mb-3 rounded-lg border border-[#1C2C64]/15 p-3">
+              <div className="text-xs text-[#1C2C64]/70 mb-1">Preview for this addition</div>
+              {(() => {
+                const pr = computedPreview();
+                return (
+                  <div className="text-sm text-[#1C2C64]">
+                    ~{pr.grams}{selected.serving_unit} · {pr.calories} kcal · P {pr.protein} · C {pr.carbs} · F {pr.fat}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={closeAddDialog}
+                className="rounded-lg border border-[#1C2C64]/20 px-3 py-1.5 text-sm text-[#1C2C64]"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmAdd}
+                className="rounded-lg border border-[#1C2C64] bg-[#1C2C64] px-3 py-1.5 text-sm text-white"
+              >
+                Add to {category}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-/** ---------- Small UI Card ---------- */
-function StatCard({ label, value }: { label: string; value: string }) {
+/** ---------- Small UI Card WITH progress ---------- */
+function StatCard({
+  label,
+  value,
+  consumed,
+  target,
+  unit,
+}: {
+  label: string;
+  value: string;
+  consumed?: number;
+  target?: number;
+  unit?: "kcal" | "g";
+}) {
+  const hasTarget = typeof target === "number" && target > 0 && typeof consumed === "number";
+  const pct = hasTarget ? Math.round((consumed! / target!) * 100) : 0;
+  const basePct = hasTarget ? Math.min(100, pct) : 0;
+  const overflowPct = hasTarget ? Math.max(0, pct - 100) : 0;
+
   return (
     <div className="rounded-xl border border-[#1C2C64]/20 p-4">
       <div className="text-xs uppercase tracking-wide text-[#1C2C64]/70">{label}</div>
       <div className="text-lg font-semibold text-[#1C2C64]">{value}</div>
+
+      {/* embedded progress bar */}
+      <div
+        className="mt-3"
+        aria-label={`${label} progress`}
+        aria-valuemin={0}
+        aria-valuemax={hasTarget ? 100 : undefined}
+        aria-valuenow={hasTarget ? Math.min(999, pct) : undefined}
+        role="progressbar"
+      >
+        <div className="relative h-2 w-full rounded bg-[#1C2C64]/10">
+          {hasTarget && (
+            <div
+              className="absolute inset-y-0 left-0 rounded"
+              style={{ width: `${basePct}%`, backgroundColor: "#1C2C64" }}
+              aria-hidden
+            />
+          )}
+        </div>
+
+        {hasTarget && overflowPct > 0 && (
+          <div className="mt-1">
+            <div className="h-1.5 w-full rounded bg-[#1C2C64]/10" />
+            <div
+              className="relative -mt-1.5 h-1.5 rounded"
+              style={{ width: `${Math.min(100, overflowPct)}%`, backgroundColor: "#F59E0B" }}
+              aria-hidden
+            />
+          </div>
+        )}
+
+        <div className="mt-1 text-[11px] text-[#1C2C64]/70">
+          {hasTarget
+            ? `${Math.round(consumed!)} ${unit} / ${Math.round(target!)} ${unit} (${Math.min(999, pct)}%)`
+            : `No target provided for ${label.toLowerCase()}.`}
+        </div>
+      </div>
     </div>
   );
 }

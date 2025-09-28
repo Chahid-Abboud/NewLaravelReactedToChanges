@@ -1,168 +1,183 @@
 // resources/js/pages/Places.tsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Head } from "@inertiajs/react";
 import NavHeader from "@/components/NavHeader";
-import NearbyMap from "@/components/NearbyMap";
-import { useMemo, useState } from "react";
+import NearbyMap, {
+  PoiFeature,
+  PlaceTypesCsv,
+  NearbyMapHandle,
+} from "@/components/NearbyMap";
+import ElasticSlider from "@/components/ElasticSlider"; // ✅ using the elastic slider
 
-/** ---------- Types ---------- */
-type PoiFeature = {
-  type: "Feature";
-  geometry: { type: "Point"; coordinates: [number, number] };
-  properties: {
-    name?: string;
-    category?: "gym" | "nutritionist" | string;
-    source?: "foursquare" | "overpass" | string;
-    address?: string | null;
-    website?: string | null;
-    distance_m?: number | null;
-  };
-};
-type PlaceTypesCsv = "gym" | "nutritionist" | "gym,nutritionist";
+const DEFAULT_RADIUS = 1500; // meters
 
 export default function Places() {
-  const [radius, setRadius] = useState<number>(2500);
+  const [radius, setRadius] = useState<number>(DEFAULT_RADIUS);
   const [types, setTypes] = useState<PlaceTypesCsv>("gym,nutritionist");
-  const [loading, setLoading] = useState<boolean>(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<PoiFeature[]>([]);
+  const [center, setCenter] = useState<[number, number] | null>(null); // [lng, lat]
+  const [geoMsg, setGeoMsg] = useState<string | null>(null);
 
-  const totals = useMemo(() => {
-    const gym = results.filter((f) => f.properties?.category === "gym").length;
-    const nut = results.filter((f) => f.properties?.category === "nutritionist").length;
-    return { gym, nut, all: results.length };
+  const mapRef = useRef<NearbyMapHandle | null>(null);
+  const token: string = (import.meta as any).env?.VITE_MAPBOX_TOKEN ?? "";
+
+  // Auto-locate once on mount; render the map only after we have a center
+  useEffect(() => {
+    if (!("geolocation" in navigator)) {
+      setGeoMsg("Geolocation not supported by this browser.");
+      return;
+    }
+    setGeoMsg("Locating…");
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setCenter([longitude, latitude]); // [lng, lat]
+        setGeoMsg(null);
+      },
+      (err) => {
+        setGeoMsg(
+          err.code === err.PERMISSION_DENIED
+            ? "Location permission denied. Enable it in your browser settings."
+            : "Could not get your location."
+        );
+      },
+      { enableHighAccuracy: true, maximumAge: 60_000, timeout: 10_000 }
+    );
+  }, []);
+
+  const counts = useMemo(() => {
+    const byCat = results.reduce(
+      (acc, f) => {
+        const cat = (f.properties?.category ?? "").toLowerCase();
+        if (cat.includes("nutrition")) acc.nutritionist++;
+        else acc.gym++;
+        return acc;
+      },
+      { gym: 0, nutritionist: 0 }
+    );
+    return byCat;
   }, [results]);
 
   return (
     <>
-      <Head title="Nearby" />
+      <Head title="Nearby — Hayetak" />
       <NavHeader />
 
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 pt-4 pb-6 space-y-3">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Nearby Gyms &amp; Nutritionists</h1>
-
-          <div className="flex items-center gap-3">
-            <label className="text-sm">
-              Radius (m)
-              <input
-                aria-label="Search radius in meters"
-                type="number"
-                min={100}
-                step={50}
-                value={radius}
-                onChange={(e) => setRadius(Math.max(100, Number(e.target.value) || 100))}
-                className="ml-2 w-28 rounded border px-2 py-1"
-              />
-            </label>
-
-            <label className="text-sm">
-              Types
-              <select
-                aria-label="Place types"
-                value={types}
-                onChange={(e) => setTypes(e.target.value as PlaceTypesCsv)}
-                className="ml-2 rounded border px-2 py-1"
-              >
-                <option value="gym,nutritionist">Gym + Nutritionist</option>
-                <option value="gym">Gym only</option>
-                <option value="nutritionist">Nutritionist only</option>
-              </select>
-            </label>
+      <main className="mx-auto max-w-6xl px-4 py-6">
+        {/* Header */}
+        <div className="mb-5 flex items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">Nearby</h1>
+            <p className="text-sm text-muted-foreground">
+              Explore gyms and nutritionists around you.
+            </p>
+          </div>
+          <div className="text-sm text-muted-foreground">
+            {loading ? "Loading…" : error ? <span className="text-red-600">{error}</span> : `${results.length} results`}
           </div>
         </div>
 
-        {/* Status / debug strip */}
-        <div className="flex items-center gap-4 text-sm">
-          <span className="rounded bg-gray-100 px-2 py-1">Total: {totals.all}</span>
-          <span className="rounded bg-gray-100 px-2 py-1">Gyms: {totals.gym}</span>
-          <span className="rounded bg-gray-100 px-2 py-1">Nutritionists: {totals.nut}</span>
-          {loading && <span className="text-gray-500">Fetching places…</span>}
-          {error && <span className="text-red-600">Error: {error}</span>}
-        </div>
-
-        {/* Two-pane layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4" style={{ minHeight: "calc(100vh - 140px)" }}>
-          {/* Map */}
-          <div className="lg:col-span-8 rounded-2xl border overflow-hidden">
-            <NearbyMap
-              accessToken={import.meta.env.VITE_MAPBOX_TOKEN}
-              radius={radius}                 
-              types={types}                   
-              onFetchStart={() => {
-                setLoading(true);
-                setError(null);
-              }}
-              onFetchError={(msg?: string) => {
-                setLoading(false);
-                setError(msg || "Failed to load POIs");
-              }}
-              onResults={(features?: PoiFeature[]) => {
-                setLoading(false);
-                setResults(features || []);
-              }}
+        {/* Controls — single row, equal widths, no wrap on desktop */}
+        <div className="mb-4 flex flex-wrap md:flex-nowrap items-end gap-4">
+          {/* Radius (ElasticSlider) */}
+          <div className="flex-1 min-w-[260px]">
+            <ElasticSlider
+              label="Radius (m)"
+              value={radius}
+              min={300}
+              max={30000}
+              step={100}
+              onChange={setRadius}
+              formatValue={(v) => `${v} m`}
             />
           </div>
 
-          {/* Results list */}
-          <aside className="lg:col-span-4 rounded-2xl border bg-white p-4 overflow-y-auto">
-            <h2 className="text-base font-semibold mb-3">Places</h2>
+          {/* Types */}
+          <label className="flex-1 min-w-[260px] flex flex-col gap-1">
+            <span className="text-sm font-medium">Types</span>
+            <select
+              value={types}
+              onChange={(e) => setTypes(e.target.value as PlaceTypesCsv)}
+              className="h-9 w-full rounded-md border bg-background px-3"
+            >
+              <option value="gym,nutritionist">Gyms + Nutritionists</option>
+              <option value="gym">Gyms only</option>
+              <option value="nutritionist">Nutritionists only</option>
+            </select>
+          </label>
 
-            {results.length === 0 ? (
-              <div className="text-sm text-gray-500">
-                No places found in this radius. Try increasing radius or switching types.
-              </div>
+          {/* Counts (button removed) */}
+          <div className="flex-1 min-w-[260px]">
+            <div className="h-9 w-full rounded-md border bg-background px-3 text-sm flex items-center justify-between">
+              <span><span className="font-semibold">{counts.gym}</span> gyms</span>
+              <span><span className="font-semibold">{counts.nutritionist}</span> nutritionists</span>
+            </div>
+            {geoMsg && <div className="mt-1 text-xs text-muted-foreground" aria-live="polite">{geoMsg}</div>}
+          </div>
+        </div>
+
+        {/* Map + List */}
+        <div className="grid gap-4 md:grid-cols-5">
+          <div className="md:col-span-3">
+            {center ? (
+              <NearbyMap
+                ref={mapRef}
+                accessToken={token}
+                radius={radius}
+                types={types}
+                center={center}
+                onFetchStart={() => { setLoading(true); setError(null); }}
+                onFetchError={(msg) => { setLoading(false); setError(msg || "Failed to load"); }}
+                onResults={(features) => { setLoading(false); setResults(features || []); }}
+                className="border"
+                heightPx={480}
+              />
             ) : (
-              <ul className="space-y-3">
+              <div className="flex h-[480px] items-center justify-center rounded-xl border">
+                <div className="text-sm text-muted-foreground">
+                  {geoMsg ?? "Waiting for location permission…"}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="md:col-span-2">
+            <div className="rounded-lg border p-3">
+              <div className="mb-2 text-sm font-medium">Results</div>
+              <ul className="max-h-[480px] space-y-2 overflow-auto pr-1">
+                {results.length === 0 && !loading && !error && (
+                  <li className="text-sm text-muted-foreground">No places found in this radius.</li>
+                )}
                 {results.map((f, i) => {
-                  const name = f.properties?.name || "Unnamed";
-                  const category = f.properties?.category ?? "—";
-                  const addr = f.properties?.address ?? "";
-                  const src = f.properties?.source ?? "—";
-                  const dist =
-                    typeof f.properties?.distance_m === "number"
-                      ? Math.round(f.properties.distance_m)
-                      : null;
-
-                  const website = f.properties?.website || "";
-                  const safeHref =
-                    website
-                      ? website.startsWith("http://") || website.startsWith("https://")
-                        ? website
-                        : `https://${website}`
-                      : "";
-
+                  const p = f.properties || {};
+                  const key = p._uid ?? `${p.name ?? "poi"}-${i}`;
                   return (
-                    <li key={`${name}-${i}`} className="rounded-lg border p-3">
+                    <li
+                      key={key}
+                      className="rounded-md border p-2 cursor-pointer hover:bg-muted/40 transition"
+                      onClick={() => mapRef.current?.showFeature(f)}
+                      title="Show on map"
+                    >
                       <div className="flex items-center justify-between">
-                        <div className="font-medium">{name}</div>
-                        <span className="text-xs rounded bg-gray-100 px-2 py-0.5">{category}</span>
+                        <div className="font-medium">{p.name || "(no name)"}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {p.category || ""}{p.source ? ` · ${p.source}` : ""}
+                        </div>
                       </div>
-
-                      {addr && <div className="text-xs text-gray-500 mt-1">{addr}</div>}
-
-                      <div className="mt-1 text-xs text-gray-500">
-                        Source: {src}
-                        {dist !== null && <> · {dist} m</>}
-                      </div>
-
-                      {safeHref && (
-                        <a
-                          href={safeHref}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-xs text-blue-600 hover:underline mt-1 inline-block"
-                        >
-                          Website
-                        </a>
+                      <div className="mt-1 text-xs text-muted-foreground">{p.address || ""}</div>
+                      {typeof p.distance_m === "number" && (
+                        <div className="mt-1 text-xs">{Math.round(p.distance_m)} m away</div>
                       )}
                     </li>
                   );
                 })}
               </ul>
-            )}
-          </aside>
+            </div>
+          </div>
         </div>
-      </div>
+      </main>
     </>
   );
 }
