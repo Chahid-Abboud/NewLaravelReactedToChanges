@@ -15,9 +15,11 @@ export default function Login() {
   return (
     <>
       <Head title="Log in" />
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 text-gray-900">
-        <div className="w-full max-w-md bg-white shadow rounded p-8 space-y-6">
-          <h1 className="text-2xl font-bold text-center">Log in to Hayetak</h1>
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground">
+        <div className="w-full max-w-md bg-card text-card-foreground shadow rounded p-8 space-y-6">
+          <h1 className="text-2xl font-bold text-center text-primary">
+            Log in to Hayetak
+          </h1>
 
           <form onSubmit={submit} className="space-y-4">
             <div>
@@ -26,9 +28,11 @@ export default function Login() {
                 type="email"
                 value={data.email}
                 onChange={(e) => setData('email', e.target.value)}
-                className="w-full border rounded px-3 py-2"
+                className="w-full border border-border rounded px-3 py-2 bg-input text-foreground"
               />
-              {errors.email && <p className="text-sm text-red-600">{errors.email}</p>}
+              {errors.email && (
+                <p className="text-sm text-destructive">{errors.email}</p>
+              )}
             </div>
 
             <div>
@@ -37,9 +41,11 @@ export default function Login() {
                 type="password"
                 value={data.password}
                 onChange={(e) => setData('password', e.target.value)}
-                className="w-full border rounded px-3 py-2"
+                className="w-full border border-border rounded px-3 py-2 bg-input text-foreground"
               />
-              {errors.password && <p className="text-sm text-red-600">{errors.password}</p>}
+              {errors.password && (
+                <p className="text-sm text-destructive">{errors.password}</p>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -48,21 +54,27 @@ export default function Login() {
                 id="remember"
                 checked={data.remember}
                 onChange={(e) => setData('remember', e.target.checked)}
+                className="accent-primary"
               />
-              <label htmlFor="remember" className="text-sm">Remember me</label>
+              <label htmlFor="remember" className="text-sm">
+                Remember me
+              </label>
             </div>
 
             <button
               type="submit"
               disabled={processing}
-              className="w-full py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition disabled:opacity-50"
+              className="w-full py-2 rounded bg-secondary text-secondary-foreground font-semibold shadow hover:opacity-90 transition disabled:opacity-50"
             >
               Log in
             </button>
           </form>
 
           <div className="text-center text-sm">
-            <Link href="/onboarding" className="text-blue-600 underline">
+            <Link
+              href="/register"
+              className="text-accent hover:underline font-medium"
+            >
               Don’t have an account? Sign up
             </Link>
           </div>

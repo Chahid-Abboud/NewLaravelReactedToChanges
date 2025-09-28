@@ -1,22 +1,29 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Head, usePage, router } from "@inertiajs/react";
 import NavHeader from "@/components/NavHeader";
 
-type Exercise = { id:number; name:string; primary_muscle:string; demo_url?:string|null };
-type Day = { id:number; day_index:number; title?:string|null; exercises: Exercise[] } | null;
-type Plan = { id:number; name:string; days: Day[] } | null;
+/* =============== Types =============== */
+type Exercise = {
+  id: number;
+  name: string;
+  primary_muscle: string;
+  equipment?: string | null;
+  demo_url?: string | null;
+};
+type Day = { id: number; day_index: number; title?: string | null; exercises: Exercise[] } | null;
+type Plan = { id: number; name: string; days: Day[] } | null;
 
 type WorkoutLogSet = {
-  id:number;
-  exercise:{id:number; name:string};
-  weight_kg:number|null;
-  reps:number;
-  set_number:number;
+  id: number;
+  exercise: { id: number; name: string };
+  weight_kg: number | null;
+  reps: number;
+  set_number: number;
 };
 
 type WorkoutLog = {
-  id:number;
-  workout_date:string;
+  id: number;
+  workout_date: string;
   sets: WorkoutLogSet[];
   workout_plan_day_id?: number | null;
 };
@@ -25,68 +32,115 @@ type Props = {
   plan: Plan;
   currentDay: Day | null;
   today: string;
-  recentLogs: WorkoutLog[];
+  recentLogs: WorkoutLog[] | undefined;
   flash?: { activeLogId?: number };
+  /** Provided by controller; optional here for safety */
+  exercises?: Exercise[];
 };
+
+/* =============== Helpers/consts =============== */
+const MUSCLES = ["chest","back","shoulders","legs","glutes","biceps","triceps","core","calves"] as const;
+const PAGE_SIZE = 40;
+const normalize = (s: string) => s.toLowerCase().trim();
 
 const fmtDate = (iso: string) => {
   try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
 };
 
-// Group sets by exercise name to render a compact digest
-function groupSetsByExercise(sets: WorkoutLogSet[]) {
+function groupSetsByExercise(sets?: WorkoutLogSet[] | null) {
   const map = new Map<string, WorkoutLogSet[]>();
+  if (!sets?.length) return Array.from(map.entries());
   for (const s of sets) {
     const key = s.exercise?.name ?? "Exercise";
     if (!map.has(key)) map.set(key, []);
     map.get(key)!.push(s);
   }
-  for (const [, arr] of map) arr.sort((a,b)=>a.set_number-b.set_number);
+  for (const [, arr] of map) arr.sort((a, b) => a.set_number - b.set_number);
   return Array.from(map.entries());
 }
 
+/* =============== Component =============== */
 export default function LogPage() {
-  const { plan, currentDay, today, recentLogs, flash } = usePage<Props>().props;
+  const page = usePage<Props>();
+  const { plan, currentDay, today, recentLogs, flash } = page.props;
 
-  const latestLog = recentLogs?.[0];
+  // ✅ Safe defaults
+  const safeExercises: Exercise[] = Array.isArray((page.props as any).exercises) ? (page.props as any).exercises : [];
+  const safeRecentLogs: WorkoutLog[] = Array.isArray(recentLogs) ? recentLogs : [];
 
-  // active log id to write sets into (assigned after first Add Set)
-  const activeLogIdRef = useRef<number | undefined>(
-    flash?.activeLogId ?? latestLog?.id
-  );
+  // keep props fresh for callbacks (avoid calling hooks inside router callbacks)
+  const propsRef = useRef<Props>(page.props);
+  useEffect(() => { propsRef.current = page.props; }, [page.props]);
 
-  // Day picker state
+  const latestLog = safeRecentLogs[0];
+  const activeLogIdRef = useRef<number | undefined>(flash?.activeLogId ?? latestLog?.id);
+
+  // Day picker
   const [isPickerOpen, setPickerOpen] = useState(false);
-  const [pickedDayId, setPickedDayId] = useState<number | "none">(
-    (currentDay?.id as number) ?? "none"
-  );
+  const [pickedDayId, setPickedDayId] = useState<number | "none">((currentDay?.id as number) ?? "none");
 
-  // Local inputs per exercise
+  // Logging inputs
   const [weights, setWeights] = useState<Record<number, string>>({});
   const [reps, setReps] = useState<Record<number, string>>({});
   const [status, setStatus] = useState<string | null>(null);
 
-  // Local start + saving state
+  // Start/save state
   const [startedLocally, setStartedLocally] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Which day to render
-// BEFORE
-// const dayForForm: Day | null =
-//   (pickedDayId !== "none" && plan?.days?.find(d => d?.id === pickedDayId)) ?? currentDay ?? null;
+  // ---------- Freestyle library state ----------
+  const exercisesById = useMemo(() => new Map(safeExercises.map((e) => [e.id, e])), [safeExercises]);
+  const [fsSelected, setFsSelected] = useState<number[]>([]);
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [muscleFilters, setMuscleFilters] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState<"name" | "muscle">("name");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-// AFTER
-const dayForForm: Day | null = pickedDayId !== "none"
-  ? (plan?.days?.find(d => d?.id === pickedDayId) ?? null)
-  : (currentDay ?? null);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search), 200);
+    return () => clearTimeout(t);
+  }, [search]);
 
+  const filteredLibrary = useMemo(() => {
+    const q = normalize(debounced);
+    let list = safeExercises;
+    if (q) list = list.filter((e) => normalize(e.name).includes(q) || normalize(e.primary_muscle).includes(q));
+    if (muscleFilters.length) {
+      const s = new Set(muscleFilters);
+      list = list.filter((e) => s.has(e.primary_muscle));
+    }
+    return [...list].sort((a, b) =>
+      sortBy === "muscle"
+        ? normalize(a.primary_muscle).localeCompare(normalize(b.primary_muscle)) ||
+          normalize(a.name).localeCompare(normalize(b.name))
+        : normalize(a.name).localeCompare(normalize(b.name))
+    );
+  }, [safeExercises, debounced, muscleFilters, sortBy]);
 
-  // Sets in current server log for an exercise (sorted)
-  const setsForExercise = (exerciseId:number) =>
+  const pagedLibrary = useMemo(() => filteredLibrary.slice(0, visibleCount), [filteredLibrary, visibleCount]);
+
+  const toggleFsAdd = (exId: number) =>
+    setFsSelected((prev) => (prev.includes(exId) ? prev : [...prev, exId]));
+
+  const removeFs = (exId: number) =>
+    setFsSelected((prev) => prev.filter((id) => id !== exId));
+
+  const isFsAdded = (exId: number) => fsSelected.includes(exId);
+
+  // ---------- Which day to render ----------
+  const dayForForm: Day | null =
+    pickedDayId !== "none"
+      ? plan?.days?.find((d) => d?.id === pickedDayId) ?? null
+      : currentDay ?? null;
+
+  // previous sets for a given exercise in latest log
+  const setsForExercise = (exerciseId: number) =>
     (latestLog?.sets || [])
-      .filter(s => s.exercise?.id === exerciseId)
-      .sort((a,b)=>a.set_number-b.set_number);
+      .filter((s) => s.exercise?.id === exerciseId)
+      .sort((a, b) => a.set_number - b.set_number);
 
+  // ---------- Start flow ----------
   const openStartDialog = () => {
     setPickerOpen(true);
     setPickedDayId((currentDay?.id as number) ?? "none");
@@ -94,16 +148,16 @@ const dayForForm: Day | null = pickedDayId !== "none"
   const confirmStart = () => {
     setPickerOpen(false);
     setStartedLocally(true);
+    setStatus(null);
   };
 
-  // After we create the workout, grab new id then run cb
-  const afterStartedEnsureId = (cb: (newLogId:number) => void) => {
+  const afterStartedEnsureId = (cb: (newLogId: number) => void) => {
     router.reload({
-      only: ["recentLogs","flash"],
+      only: ["recentLogs", "flash"],
       onSuccess: () => {
-        const props = (usePage() as any).props as Props;
-        const fromFlash = props.flash?.activeLogId;
-        const fromRecent = props.recentLogs?.[0]?.id;
+        const p = propsRef.current;
+        const fromFlash = p.flash?.activeLogId;
+        const fromRecent = Array.isArray(p.recentLogs) ? p.recentLogs[0]?.id : undefined;
         const id = fromFlash ?? fromRecent;
         if (!id) return setStatus("Could not determine new workout ID.");
         activeLogIdRef.current = id;
@@ -112,7 +166,7 @@ const dayForForm: Day | null = pickedDayId !== "none"
     });
   };
 
-  const createWorkoutIfNeeded = (after?: (newLogId:number) => void) => {
+  const createWorkoutIfNeeded = (after?: (newLogId: number) => void) => {
     if (activeLogIdRef.current) return after?.(activeLogIdRef.current);
     router.post(
       "/workouts/log/start",
@@ -124,17 +178,18 @@ const dayForForm: Day | null = pickedDayId !== "none"
     );
   };
 
-  const addSet = (exerciseId:number) => {
+  // ---------- Adding sets ----------
+  const addSet = (exerciseId: number) => {
     setStatus(null);
     const w = weights[exerciseId];
     const r = reps[exerciseId];
     const repsNum = r ? Number(r) : NaN;
     const weightNum = w?.length ? Number(w) : null;
 
-    if (!repsNum || repsNum <= 0) return setStatus("Please enter reps (>0).");
+    if (!Number.isFinite(repsNum) || repsNum <= 0) return setStatus("Please enter reps (>0).");
     if (w && isNaN(Number(w))) return setStatus("Weight must be a number (or leave empty for bodyweight).");
 
-    const send = (logId:number) => {
+    const send = (logId: number) => {
       const next = (setsForExercise(exerciseId).slice(-1)[0]?.set_number ?? 0) + 1;
       router.post(
         `/workouts/log/${logId}/add-set`,
@@ -157,7 +212,7 @@ const dayForForm: Day | null = pickedDayId !== "none"
   const saveWorkout = () => {
     const id = activeLogIdRef.current;
     if (!id) return setStatus("You haven’t added any sets yet. Add at least one set before saving.");
-    const hasAnySets = !!(recentLogs?.[0]?.sets?.length);
+    const hasAnySets = !!(Array.isArray(propsRef.current.recentLogs) && propsRef.current.recentLogs[0]?.sets?.length);
     if (!hasAnySets) return setStatus("Your workout has no sets yet. Add at least one set before saving.");
 
     setSaving(true);
@@ -167,38 +222,50 @@ const dayForForm: Day | null = pickedDayId !== "none"
       {
         onSuccess: () => {
           setStatus("Workout saved — great job!");
-          router.reload({ only: ["recentLogs","plan","currentDay"] });
+          router.reload({ only: ["recentLogs", "plan", "currentDay"] });
         },
         onFinish: () => setSaving(false),
       }
     );
   };
 
-  const recentNonEmpty = (recentLogs || []).filter(l => (l.sets?.length ?? 0) > 0);
+  const recentNonEmpty = safeRecentLogs.filter((l) => (l.sets?.length ?? 0) > 0);
+
+  // ---------- Freestyle computed list of chosen exercises ----------
+  const freestyleExercises: Exercise[] =
+    pickedDayId === "none"
+      ? fsSelected
+          .map((id) => exercisesById.get(id))
+          .filter((x): x is Exercise => !!x)
+      : [];
+
+  const showLoggingArea =
+    startedLocally &&
+    (
+      (pickedDayId !== "none" && !!dayForForm?.exercises?.length) ||
+      (pickedDayId === "none" && freestyleExercises.length > 0)
+    );
 
   return (
     <>
       <Head title="Workout Log" />
-
-      {/* ✅ Shared sticky header */}
       <NavHeader />
 
-      <main className="mx-auto max-w-6xl px-6 py-8 space-y-10">
+      <main className="mx-auto max-w-7xl px-6 py-8 space-y-10">
         <div aria-live="polite" className="sr-only">{status ?? ""}</div>
 
-        {/* Hero row */}
+        {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold tracking-tight">Workout Log</h1>
           <button
             onClick={openStartDialog}
             className="px-4 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700"
-            aria-label="Start today's workout"
           >
             Start Today’s Workout
           </button>
         </div>
 
-        {/* Start picker (inline) */}
+        {/* Start picker */}
         {isPickerOpen && (
           <section className="rounded-2xl border p-4 bg-white shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center gap-3">
@@ -225,22 +292,260 @@ const dayForForm: Day | null = pickedDayId !== "none"
           </section>
         )}
 
-        {/* Today quick logger */}
+        {/* Today row */}
         <section className="rounded-2xl border p-6 bg-white shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold">Today</h2>
             <div className="text-sm text-gray-500">{fmtDate(today)}</div>
           </div>
 
-          {(startedLocally && dayForForm?.exercises?.length) ? (
+          {/* Freestyle library when no plan selected */}
+          {startedLocally && pickedDayId === "none" && (
+            <div className="grid lg:grid-cols-[1fr_380px] gap-6">
+              {/* Selected list (left) */}
+              <div className="space-y-3">
+                <div className="text-sm text-gray-600">
+                  Pick exercises from the library, then add your sets below.
+                </div>
+
+                {freestyleExercises.length ? (
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {freestyleExercises.map((ex) => {
+                      const prevSets = setsForExercise(ex.id);
+                      const last = prevSets.slice(-1)[0];
+                      const weightValue = weights[ex.id] ?? (last?.weight_kg != null ? String(last.weight_kg) : "");
+
+                      return (
+                        <div key={ex.id} className="rounded-xl border p-4">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="font-semibold">{ex.name}</div>
+                              <div className="text-xs text-gray-500 capitalize">{ex.primary_muscle}</div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {ex.demo_url ? (
+                                <a href={ex.demo_url} target="_blank" className="text-xs text-blue-600 hover:underline" rel="noreferrer">
+                                  demo
+                                </a>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => removeFs(ex.id)}
+                                className="text-xs text-red-600 hover:underline"
+                                aria-label="Remove from today"
+                              >
+                                remove
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Inputs for adding a new set */}
+                          <div className="mt-3 grid grid-cols-[6rem,6rem,auto] items-end gap-2">
+                            <div>
+                              <label htmlFor={`w-${ex.id}`} className="text-xs text-gray-600">Weight (kg)</label>
+                              <input
+                                id={`w-${ex.id}`}
+                                type="number"
+                                inputMode="decimal"
+                                placeholder="kg"
+                                className="mt-1 border rounded px-3 py-1 w-full"
+                                value={weightValue}
+                                onChange={(e) => setWeights((p) => ({ ...p, [ex.id]: e.target.value }))}
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor={`r-${ex.id}`} className="text-xs text-gray-600">Reps</label>
+                              <input
+                                id={`r-${ex.id}`}
+                                type="number"
+                                inputMode="numeric"
+                                placeholder="reps"
+                                className="mt-1 border rounded px-3 py-1 w-full"
+                                value={reps[ex.id] ?? ""}
+                                onChange={(e) => setReps((p) => ({ ...p, [ex.id]: e.target.value }))}
+                              />
+                            </div>
+                            <div className="flex">
+                              <button onClick={() => addSet(ex.id)} className="ml-auto px-3 py-2 rounded bg-gray-900 text-white">
+                                Add Set
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Existing sets */}
+                          {prevSets.length ? (
+                            <div className="mt-3 text-sm space-y-1">
+                              {prevSets.map((s) => (
+                                <div key={s.id} className="flex justify-between">
+                                  <div className="text-gray-600">Set {s.set_number}</div>
+                                  <div className="tabular-nums">{s.weight_kg ?? "BW"} kg × {s.reps}</div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="mt-3 text-sm text-gray-400">No sets yet.</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-gray-500">No exercises selected yet — add some from the library →</div>
+                )}
+
+                {/* Save */}
+                {freestyleExercises.length > 0 && (
+                  <div className="mt-6 flex items-center justify-end">
+                    <button
+                      disabled={saving}
+                      onClick={saveWorkout}
+                      className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+                    >
+                      {saving ? "Saving…" : "Save Workout"}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Library (right) */}
+              <aside className="space-y-3">
+                <div className="rounded-2xl border bg-white shadow-sm">
+                  <div className="p-3 border-b sticky top-[60px] bg-white z-10">
+                    <div className="flex flex-col gap-3">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-semibold">Exercise Library</h3>
+                        <span className="text-xs text-gray-500">{filteredLibrary.length} results</span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="search" className="sr-only">Search exercises</label>
+                        <input
+                          id="search"
+                          type="search"
+                          placeholder="Search by name or muscle…"
+                          value={search}
+                          onChange={(e) => { setSearch(e.target.value); setVisibleCount(PAGE_SIZE); }}
+                          className="flex-1 border rounded px-3 py-2"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {MUSCLES.map((m) => {
+                          const active = muscleFilters.includes(m);
+                          return (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => {
+                                setMuscleFilters((prev) => active ? prev.filter((x) => x !== m) : [...prev, m]);
+                                setVisibleCount(PAGE_SIZE);
+                              }}
+                              className={`text-xs px-2 py-1 rounded-full border ${active ? "bg-blue-600 text-white border-blue-600" : "bg-white"}`}
+                              aria-pressed={active}
+                            >
+                              {m}
+                            </button>
+                          );
+                        })}
+                        {muscleFilters.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setMuscleFilters([])}
+                            className="text-xs px-2 py-1 rounded-full border bg-white"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <label htmlFor="sort" className="text-xs text-gray-600">Sort</label>
+                        <select
+                          id="sort"
+                          value={sortBy}
+                          onChange={(e) => setSortBy(e.target.value as any)}
+                          className="border rounded px-2 py-1 text-sm"
+                        >
+                          <option value="name">Name (A→Z)</option>
+                          <option value="muscle">Muscle group</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Grid */}
+                  <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {pagedLibrary.length ? (
+                      pagedLibrary.map((ex) => {
+                        const added = isFsAdded(ex.id);
+                        return (
+                          <div key={ex.id} className="border rounded-xl p-3">
+                            <div className="font-medium line-clamp-2" title={ex.name}>{ex.name}</div>
+                            <div className="text-xs text-gray-500 capitalize mt-0.5">
+                              {ex.primary_muscle} · {ex.equipment ?? "—"}
+                            </div>
+                            <div className="mt-2 flex items-center justify-between">
+                              <button
+                                type="button"
+                                onClick={() => toggleFsAdd(ex.id)}
+                                disabled={added}
+                                className={`text-xs px-2 py-1 rounded ${added ? "bg-gray-200 text-gray-500" : "bg-blue-600 text-white"}`}
+                                aria-disabled={added}
+                              >
+                                {added ? "Added" : "Add"}
+                              </button>
+                              {ex.demo_url && (
+                                <a href={ex.demo_url} target="_blank" className="text-xs text-blue-600 hover:underline" rel="noreferrer">
+                                  demo
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-sm text-gray-500">No exercises match your filters.</div>
+                    )}
+                  </div>
+
+                  {filteredLibrary.length - pagedLibrary.length > 0 && (
+                    <div className="p-3 border-t flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                        className="px-4 py-2 rounded border hover:bg-gray-50"
+                      >
+                        Load more ({filteredLibrary.length - pagedLibrary.length} left)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
+          )}
+
+          {/* Planned-day logging OR empty-state */}
+          {!showLoggingArea ? (
+            <div className="text-gray-600">
+              {startedLocally ? (
+                pickedDayId === "none"
+                  ? <>Pick exercises from the library on the right to start logging your freestyle workout.</>
+                  : <>This day has no exercises. Add some in the <a className="text-blue-600 hover:underline" href="/workouts/plan">Planner</a>.</>
+              ) : (
+                <>No workout chosen for today yet. Click{" "}
+                  <button className="text-blue-600 hover:underline" onClick={openStartDialog}>
+                    Start Today’s Workout
+                  </button>{" "}
+                  to pick a plan day or freestyle.</>
+              )}
+            </div>
+          ) : pickedDayId !== "none" ? (
             <>
               <div className="grid md:grid-cols-2 gap-4">
-                {dayForForm.exercises.map((ex) => {
+                {dayForForm!.exercises.map((ex) => {
                   const prevSets = setsForExercise(ex.id);
                   const last = prevSets.slice(-1)[0];
-                  const weightValue =
-                    weights[ex.id] ?? (last?.weight_kg != null ? String(last.weight_kg) : "");
-
+                  const weightValue = weights[ex.id] ?? (last?.weight_kg != null ? String(last.weight_kg) : "");
                   return (
                     <div key={ex.id} className="rounded-xl border p-4">
                       <div className="flex items-start justify-between">
@@ -248,14 +553,11 @@ const dayForForm: Day | null = pickedDayId !== "none"
                           <div className="font-semibold">{ex.name}</div>
                           <div className="text-xs text-gray-500 capitalize">{ex.primary_muscle}</div>
                         </div>
-                        {ex.demo_url && (
-                          <a href={ex.demo_url} target="_blank" className="text-xs text-blue-600 hover:underline" rel="noreferrer">
-                            demo
-                          </a>
-                        )}
+                        {ex.demo_url ? (
+                          <a href={ex.demo_url} target="_blank" className="text-xs text-blue-600 hover:underline" rel="noreferrer">demo</a>
+                        ) : null}
                       </div>
 
-                      {/* Inputs for adding a new set */}
                       <div className="mt-3 grid grid-cols-[6rem,6rem,auto] items-end gap-2">
                         <div>
                           <label htmlFor={`w-${ex.id}`} className="text-xs text-gray-600">Weight (kg)</label>
@@ -282,16 +584,12 @@ const dayForForm: Day | null = pickedDayId !== "none"
                           />
                         </div>
                         <div className="flex">
-                          <button
-                            onClick={() => addSet(ex.id)}
-                            className="ml-auto px-3 py-2 rounded bg-gray-900 text-white"
-                          >
+                          <button onClick={() => addSet(ex.id)} className="ml-auto px-3 py-2 rounded bg-gray-900 text-white">
                             Add Set
                           </button>
                         </div>
                       </div>
 
-                      {/* Existing sets (from server) */}
                       {prevSets.length ? (
                         <div className="mt-3 text-sm space-y-1">
                           {prevSets.map((s) => (
@@ -309,7 +607,6 @@ const dayForForm: Day | null = pickedDayId !== "none"
                 })}
               </div>
 
-              {/* Save workout (finish) */}
               <div className="mt-6 flex items-center justify-end">
                 <button
                   disabled={saving}
@@ -320,22 +617,10 @@ const dayForForm: Day | null = pickedDayId !== "none"
                 </button>
               </div>
             </>
-          ) : (
-            <div className="text-gray-600">
-              No workout plan chosen for today yet. Click{" "}
-              <button className="text-blue-600 hover:underline" onClick={openStartDialog}>
-                Start Today’s Workout
-              </button>{" "}
-              to pick a plan day, or{" "}
-              <a className="text-blue-600 hover:underline" href="/workouts/plan">
-                open Planner
-              </a>
-              .
-            </div>
-          )}
+          ) : null}
         </section>
 
-        {/* Your plan snapshot */}
+        {/* Plan snapshot */}
         <section className="rounded-2xl border p-6 bg-white shadow-sm">
           <h2 className="text-lg font-semibold mb-4">Your Plan</h2>
           {plan?.days?.length ? (
@@ -349,8 +634,7 @@ const dayForForm: Day | null = pickedDayId !== "none"
                     {d!.exercises?.length ? (
                       d!.exercises.map((ex) => (
                         <li key={ex.id}>
-                          {ex.name}{" "}
-                          <span className="text-gray-500 lowercase">({ex.primary_muscle})</span>
+                          {ex.name} <span className="text-gray-500 lowercase">({ex.primary_muscle})</span>
                         </li>
                       ))
                     ) : (
@@ -363,15 +647,12 @@ const dayForForm: Day | null = pickedDayId !== "none"
           ) : (
             <div className="text-gray-600">
               No workout plan yet.{" "}
-              <a href="/workouts/plan" className="text-blue-600 hover:underline">
-                Create one
-              </a>
-              .
+              <a href="/workouts/plan" className="text-blue-600 hover:underline">Create one</a>.
             </div>
           )}
         </section>
 
-        {/* Recent sessions (grouped, empties hidden) */}
+        {/* Recent logs */}
         <section className="rounded-2xl border p-6 bg-white shadow-sm">
           <h2 className="text-lg font-semibold mb-4">Recent Logs</h2>
           {recentNonEmpty.length ? (
@@ -388,8 +669,7 @@ const dayForForm: Day | null = pickedDayId !== "none"
                           <div className="mt-1 text-gray-700 tabular-nums">
                             {sets.map((s, idx) => (
                               <span key={s.id}>
-                                {s.weight_kg ?? "BW"}×{s.reps}
-                                {idx < sets.length - 1 ? ", " : ""}
+                                {s.weight_kg ?? "BW"}×{s.reps}{idx < sets.length - 1 ? ", " : ""}
                               </span>
                             ))}
                           </div>

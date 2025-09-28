@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Workout;
 
 use App\Http\Controllers\Controller;
+use App\Models\Exercise;
 use App\Models\WorkoutLog;
 use App\Models\WorkoutLogSet;
 use App\Models\WorkoutPlan;
@@ -10,36 +11,54 @@ use App\Models\WorkoutPlanDay;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
+use Inertia\Inertia;
 
 class WorkoutLogController extends Controller
 {
     public function index(Request $request)
     {
         $userId = Auth::id();
-        $plan = WorkoutPlan::with('days.exercises')->where('user_id', $userId)->first();
 
-        $today = Carbon::today();
+        // Load plan like Planner (days + exercises ordered)
+        $plan = WorkoutPlan::with([
+            'days.exercises' => function ($q) {
+                $q->orderBy('primary_muscle')->orderBy('name');
+            },
+            'days' => function ($q) {
+                $q->orderBy('day_index');
+            },
+        ])->where('user_id', $userId)->first();
+
+        $today   = Carbon::today();
         $weekday = (int) $today->isoWeekday(); // 1..7
         $currentDay = optional($plan?->days->firstWhere('day_index', $weekday)) ?: $plan?->days->first();
 
-        $recentLogs = WorkoutLog::with('sets.exercise')
+        // Recent logs with sets and exercise eager loaded
+        $recentLogs = WorkoutLog::with([
+                'sets' => function ($q) {
+                    $q->orderBy('set_number');
+                },
+                'sets.exercise:id,name,primary_muscle',
+            ])
             ->where('user_id', $userId)
             ->orderByDesc('workout_date')
+            ->orderByDesc('id')
             ->limit(14)
-            ->get();
+            ->get(['id','workout_date','workout_plan_day_id']);
 
-        // IMPORTANT: match your path resources/js/pages/Workout/Log.tsx
+        // Exercise library (needed for freestyle picker)
+        $exercises = Exercise::orderBy('primary_muscle')
+            ->orderBy('name')
+            ->get(['id','name','primary_muscle','equipment','demo_url']);
+
         return Inertia::render('workouts/log', [
-            'plan' => $plan,
-            'currentDay' => $currentDay,
-            'today' => $today->toDateString(),
-            'recentLogs' => $recentLogs,
-            // expose flashed id for the frontend (Inertia puts this under props.flash)
-            'flash' => [
-                'activeLogId' => session('activeLogId'),
-            ],
+            'plan'        => $plan,
+            'currentDay'  => $currentDay,
+            'today'       => $today->toDateString(),
+            'recentLogs'  => $recentLogs,
+            'exercises'   => $exercises,
+            'flash'       => ['activeLogId' => session('activeLogId')],
         ]);
     }
 
@@ -61,7 +80,6 @@ class WorkoutLogController extends Controller
 
     public function addSet(Request $request, WorkoutLog $log)
     {
-        // replaced $this->authorize(...) with a simple owner check (silences Intelephense)
         if ($log->user_id !== Auth::id()) {
             abort(403, 'Unauthorized');
         }
@@ -104,10 +122,6 @@ class WorkoutLogController extends Controller
         return back()->with('success', 'Great job! Workout saved ');
     }
 
-    /**
-     * Progress per muscle group per week (average "top set" weight).
-     * Returns: [{week:"2025-W37", chest: 72.5, back: 80, ...}, ...]
-     */
     public function progress(Request $request)
     {
         $userId = Auth::id();
@@ -123,7 +137,6 @@ class WorkoutLogController extends Controller
             ->orderBy('yw')
             ->get();
 
-        // pivot to structure { week => {muscle => avgTopWeight} }
         $byWeek = [];
         foreach ($rows as $r) {
             $weekKey = $this->formatWeek((int) $r->yw);
@@ -148,7 +161,6 @@ class WorkoutLogController extends Controller
 
     private function formatWeek(int $yearWeek): string
     {
-        // YEARWEEK 202537 -> "2025-W37"
         $yw   = (string) $yearWeek;
         $year = substr($yw, 0, 4);
         $week = substr($yw, 4);

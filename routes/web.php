@@ -16,15 +16,13 @@ use App\Http\Controllers\FoodController;         // singular class name matches 
 use App\Http\Controllers\MealEntryController;    // fixed filename / class name
 use App\Http\Controllers\Workout\WorkoutPlanController;
 use App\Http\Controllers\Workout\WorkoutLogController;
-
+use App\Http\Controllers\PlacesLocalController;
 /*
 |--------------------------------------------------------------------------
 | Landing (public)
 |--------------------------------------------------------------------------
 */
-Route::get('/', function () {
-    return Inertia::render('Landing');
-})->name('landing');
+Route::get('/', fn () => Inertia::render('Landing'))->name('landing');
 
 /*
 |--------------------------------------------------------------------------
@@ -84,26 +82,21 @@ Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])
 | App pages (Inertia)
 |--------------------------------------------------------------------------
 */
-Route::get('/explore', fn () => Inertia::render('Explore'))->name('explore');
-
-Route::middleware('auth')->group(function () {
-    Route::get('/meals', fn () => Inertia::render('Meals/Index'))->name('meals.index');
-    Route::get('/meals/new', fn () => Inertia::render('Meals/New'))->name('meals.new');
-
-    // ✅ FIX: remove non-existent Workouts/Index & Workouts/New.
-    // Keep pretty URLs working by redirecting to the real pages that have data.
-    Route::redirect('/workouts', '/workouts/log')->name('workouts.index');
-    Route::redirect('/workouts/new', '/workouts/plan')->name('workouts.new');
-});
+Route::get('/explore', fn () => Inertia::render('Explore'))->name('explore'); // keep only if you have Pages/Explore.tsx
 
 /*
 |--------------------------------------------------------------------------
 | Maps / Places
 |--------------------------------------------------------------------------
+| We render the same Places page for both /nearby (Nav menu target) and /places (alias).
+| Make sure you have: resources/js/pages/Places.tsx that uses <NearbyMap .../>
 */
-Route::get('/nearby', fn () => Inertia::render('NearbyMap'))->name('nearby');
-Route::get('/google-nearby', fn () => Inertia::render('GoogleNearby'))->name('google.nearby');
+Route::get('/nearby', fn () => Inertia::render('Places'))->name('nearby');
+Route::get('/places', fn () => Inertia::render('Places'))->name('places');
 
+Route::get('/google-nearby', fn () => Inertia::render('GoogleNearby'))->name('google.nearby'); // keep only if page exists
+
+// API endpoint (you can also move this to routes/api.php if you prefer)
 Route::get('/api/places', [PlacesController::class, 'index'])
     ->middleware('throttle:60,1')
     ->name('api.places');
@@ -124,6 +117,16 @@ Route::middleware('auth')->group(function () {
 */
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
+
+    // Endpoints used by the Profile/Show React page
+    Route::post('/profile/update', [ProfileController::class, 'updateProfileBasic'])
+        ->name('profile.update.basic');
+
+    Route::post('/profile/prefs', [ProfileController::class, 'updatePrefs'])
+        ->name('profile.prefs');
+
+    Route::post('/profile/measurements', [ProfileController::class, 'addMeasurement'])
+        ->name('profile.measurements.add');
 });
 
 /*
@@ -173,22 +176,5 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/workouts/progress', [WorkoutLogController::class, 'progress'])->name('workouts.progress');
 });
 
-/*
-|--------------------------------------------------------------------------
-| Profile (auth + verified)
-|--------------------------------------------------------------------------
-*/
-Route::middleware(['auth', 'verified'])->group(function () {
-    Route::get('/profile', [ProfileController::class, 'show'])->name('profile.show');
-
-    // NEW endpoints used by the Profile/Show React page
-    Route::post('/profile/update', [ProfileController::class, 'updateProfileBasic'])
-        ->name('profile.update.basic');
-
-    Route::post('/profile/prefs', [ProfileController::class, 'updatePrefs'])
-        ->name('profile.prefs');
-
-    Route::post('/profile/measurements', [ProfileController::class, 'addMeasurement'])
-        ->name('profile.measurements.add');
-});
-
+Route::get('/api/places-local', [PlacesLocalController::class, 'index'])
+    ->name('api.places.local');

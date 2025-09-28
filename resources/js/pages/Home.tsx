@@ -43,7 +43,10 @@ type DayLog = {
 } | null;
 
 type Totals = { calories: number; protein: number; carbs: number; fat: number };
-type PerMealTotals = Record<"breakfast" | "lunch" | "dinner" | "snack" | "drink", Totals>;
+type PerMealTotals = Record<
+  "breakfast" | "lunch" | "dinner" | "snack" | "drink",
+  Totals
+>;
 
 type HomeProps = {
   auth: { user: AuthUser };
@@ -56,11 +59,23 @@ type HomeProps = {
   latestLog?: DayLog;
 
   // NEW summaries from HomeController
-  todayMacros?: { date: string; calories: number; protein: number; carbs: number; fat: number } | null;
+  todayMacros?: {
+    date: string;
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+  } | null;
   mealTotals?: PerMealTotals | null;
 };
 
-const CAT_ORDER: TodayLogItem["category"][] = ["breakfast", "lunch", "dinner", "snack", "drink"];
+const CAT_ORDER: TodayLogItem["category"][] = [
+  "breakfast",
+  "lunch",
+  "dinner",
+  "snack",
+  "drink",
+];
 
 // ---- Workout progress types (client-fetched) ----
 type ProgressPoint = { week: string; [muscle: string]: number | string };
@@ -90,9 +105,17 @@ export default function Home() {
   const hRaw = userProfile?.height_cm;
   const wRaw = userProfile?.weight_kg;
   const heightNum =
-    typeof hRaw === "string" ? Number(hRaw) : typeof hRaw === "number" ? hRaw : undefined;
+    typeof hRaw === "string"
+      ? Number(hRaw)
+      : typeof hRaw === "number"
+      ? hRaw
+      : undefined;
   const weightNum =
-    typeof wRaw === "string" ? Number(wRaw) : typeof wRaw === "number" ? wRaw : undefined;
+    typeof wRaw === "string"
+      ? Number(wRaw)
+      : typeof wRaw === "number"
+      ? wRaw
+      : undefined;
   const profileSafe =
     typeof heightNum === "number" &&
     isFinite(heightNum) &&
@@ -119,7 +142,13 @@ export default function Home() {
   }
 
   // NEW macro summaries
-  const macros = todayMacros ?? { date: "", calories: 0, protein: 0, carbs: 0, fat: 0 };
+  const macros = todayMacros ?? {
+    date: "",
+    calories: 0,
+    protein: 0,
+    carbs: 0,
+    fat: 0,
+  };
   const perMeal: PerMealTotals =
     mealTotals ?? {
       breakfast: { calories: 0, protein: 0, carbs: 0, fat: 0 },
@@ -148,19 +177,29 @@ export default function Home() {
   return (
     <>
       <Head title="Home" />
-
-      {/* ✅ Shared sticky header */}
       <NavHeader />
 
       <main className="mx-auto max-w-6xl px-6 py-8 space-y-10">
-        {/* Page heading */}
-        <section>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Welcome to Hayetak, {displayName}
-          </h1>
-          <p className="text-gray-600">
-            {isGuest ? "You are browsing as a guest." : "Here’s your personalized dashboard."}
-          </p>
+        {/* Page heading + Explore CTA */}
+        <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">
+              Welcome to Hayetak, {displayName}
+            </h1>
+            <p className="text-gray-600">
+              {isGuest
+                ? "You are browsing as a guest."
+                : "Here’s your personalized dashboard."}
+            </p>
+          </div>
+
+          {/* 👇 Explore button that goes to the map page */}
+          <Link
+            href="/places"
+            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700"
+          >
+            Explore Nearby
+          </Link>
         </section>
 
         {/* NEW: Daily Macros + Per-meal summary */}
@@ -168,7 +207,10 @@ export default function Home() {
           <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Today’s Macros</h2>
-              <Link href="/meal-tracker" className="text-sm text-blue-600 hover:underline">
+              <Link
+                href="/meal-tracker"
+                className="text-sm text-blue-600 hover:underline"
+              >
                 Open Meal Tracker
               </Link>
             </div>
@@ -183,11 +225,14 @@ export default function Home() {
 
             {/* Per-meal row */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-              {(["breakfast", "lunch", "dinner", "snack", "drink"] as const).map((mt) => (
+              {(
+                ["breakfast", "lunch", "dinner", "snack", "drink"] as const
+              ).map((mt) => (
                 <div key={mt} className="rounded-xl border p-3">
                   <div className="text-sm font-medium capitalize">{mt}</div>
                   <div className="text-xs text-gray-500">
-                    {round(perMeal[mt].calories)} kcal · P {round(perMeal[mt].protein)} · C{" "}
+                    {round(perMeal[mt].calories)} kcal · P{" "}
+                    {round(perMeal[mt].protein)} · C{" "}
                     {round(perMeal[mt].carbs)} · F {round(perMeal[mt].fat)}
                   </div>
                 </div>
@@ -215,122 +260,22 @@ export default function Home() {
               <WaterCard
                 isGuest={isGuest}
                 water={water ?? { today_ml: 0, target_ml: 2000 }}
-                onQuickAdd={(ml: number) => router.post("/water", { ml }, { preserveScroll: true })}
+                onQuickAdd={(ml: number) =>
+                  router.post("/water", { ml }, { preserveScroll: true })
+                }
               />
             </div>
           </div>
         </section>
 
-        {/* Legacy: Today’s Meals */}
-        <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h2 className="text-xl font-semibold">Today’s Meals (Legacy)</h2>
-              <p className="text-gray-600">
-                This shows your older meal log. Use the Meal Tracker for searchable foods & totals.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => router.visit("/meal-tracker")}
-                className="px-4 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700"
-              >
-                Open Meal Tracker
-              </button>
-            </div>
-          </div>
-
-          {logToShow ? (
-            <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {CAT_ORDER.map((cat) => (
-                <div key={cat} className="rounded-xl border p-4">
-                  <h3 className="text-sm font-semibold text-gray-700 capitalize">{cat}</h3>
-                  {grouped[cat].length ? (
-                    <ul className="mt-2 space-y-1 text-sm text-gray-800">
-                      {grouped[cat].map((it, idx) => (
-                        <li key={`${cat}-${idx}`}>
-                          • {it.label}
-                          {it.quantity != null && it.quantity !== 0 ? (
-                            <>
-                              {" "}
-                              (<span className="tabular-nums">{it.quantity}</span>
-                              {it.unit ? ` ${it.unit}` : ""})
-                            </>
-                          ) : null}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="mt-2 text-sm text-gray-400">—</div>
-                  )}
-                </div>
-              ))}
-
-              {(logToShow.other_notes || logToShow.photo_url) && (
-                <div className="sm:col-span-2 lg:col-span-3 rounded-xl border p-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {logToShow.other_notes && (
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-700">Notes</h3>
-                        <p className="mt-1 text-sm text-gray-800 whitespace-pre-line">
-                          {logToShow.other_notes}
-                        </p>
-                      </div>
-                    )}
-                    {logToShow.photo_url && (
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-700 mb-1">Photo</h3>
-                        <img
-                          src={logToShow.photo_url}
-                          alt="Meal"
-                          className="rounded-lg border max-h-64 object-cover"
-                        />
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="mt-4 rounded-xl border border-dashed border-gray-300 p-4 text-gray-500">
-              No meals logged today.
-              {latestLog ? (
-                <>
-                  {" "}
-                  <span className="text-gray-600">
-                    (Last log: <b>{latestLog.consumed_at}</b>)
-                  </span>{" "}
-                  <button
-                    onClick={() => router.visit("/meal-tracker")}
-                    className="text-blue-700 hover:underline"
-                  >
-                    Log today
-                  </button>
-                  .
-                </>
-              ) : (
-                <>
-                  {" "}
-                  <button
-                    onClick={() => router.visit("/meal-tracker")}
-                    className="text-blue-700 hover:underline"
-                  >
-                    Log now
-                  </button>
-                  .
-                </>
-              )}
-            </div>
-          )}
-        </section>
-
-        {/* Log Workouts (functional) */}
+        {/* Log Workouts */}
         <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <h2 className="text-xl font-semibold">Log Workouts</h2>
               <p className="text-gray-600">
-                Start a session, then record sets & reps. See weekly progress by muscle group.
+                Start a session, then record sets & reps. See weekly progress by
+                muscle group.
               </p>
             </div>
             <div className="flex items-center gap-3">
@@ -364,7 +309,9 @@ export default function Home() {
               <ProgressMini />
             </div>
             <div className="rounded-xl border p-4">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Motivation</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">
+                Motivation
+              </h3>
               <MotivationBox />
             </div>
           </div>
@@ -377,16 +324,14 @@ export default function Home() {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border p-4">
-      <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+      <div className="text-xs uppercase tracking-wide text-gray-500">
+        {label}
+      </div>
       <div className="text-lg font-semibold">{value}</div>
     </div>
   );
 }
 
-/**
- * Mini progress table (no external libs).
- * Fetches /workouts/progress?weeks=8 and shows last 4 weeks for common muscles.
- */
 function ProgressMini() {
   const [series, setSeries] = useState<ProgressPoint[]>([]);
   useEffect(() => {
@@ -397,11 +342,23 @@ function ProgressMini() {
   }, []);
 
   if (!series.length) {
-    return <div className="text-sm text-gray-500">Log a few workouts to unlock progress.</div>;
+    return (
+      <div className="text-sm text-gray-500">
+        Log a few workouts to unlock progress.
+      </div>
+    );
   }
 
   const last4 = series.slice(-4);
-  const muscles = ["chest", "back", "shoulders", "legs", "biceps", "triceps", "core"];
+  const muscles = [
+    "chest",
+    "back",
+    "shoulders",
+    "legs",
+    "biceps",
+    "triceps",
+    "core",
+  ];
 
   return (
     <div className="overflow-x-auto">
@@ -410,7 +367,9 @@ function ProgressMini() {
           <tr className="text-left text-gray-600">
             <th className="py-1 pr-4">Week</th>
             {muscles.map((m) => (
-              <th key={m} className="py-1 pr-4 capitalize">{m}</th>
+              <th key={m} className="py-1 pr-4 capitalize">
+                {m}
+              </th>
             ))}
           </tr>
         </thead>
@@ -431,10 +390,6 @@ function ProgressMini() {
   );
 }
 
-/**
- * Pulls the motivation payload and renders it.
- * If ProgressMini already fetched, this will fetch again (cheap); feel free to DRY later.
- */
 function MotivationBox() {
   const [motivation, setMotivation] = useState<Motivation>(null);
 
@@ -446,7 +401,11 @@ function MotivationBox() {
   }, []);
 
   if (!motivation) {
-    return <div className="text-sm text-gray-500">Keep logging to see weekly wins ✨</div>;
+    return (
+      <div className="text-sm text-gray-500">
+        Keep logging to see weekly wins ✨
+      </div>
+    );
   }
 
   return (

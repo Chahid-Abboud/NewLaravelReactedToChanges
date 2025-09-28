@@ -4,80 +4,102 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
-use Inertia\Inertia;
+use Illuminate\Support\Facades\DB;
 
 class RegisterWizardController extends Controller
 {
+    /**
+     * If you render a wizard page via Inertia/Blade, keep this.
+     * Otherwise you can remove it.
+     */
     public function create()
     {
-        return Inertia::render('Auth/RegisterWizard', [
-            'dietOptions' => [
-                'Mediterranean','Keto','Paleo','Vegan','Vegetarian','DASH','Low-Carb','High-Protein',
-                'Intermittent Fasting','Whole30'
-            ],
-            'allergyOptions' => [
-                'Peanuts','Tree Nuts','Milk','Eggs','Wheat','Soy','Fish','Shellfish','Sesame','Gluten',
-                'Mustard','Celery','Lupin','Sulphites','Corn','Gelatin','Coconut','Kiwi','Banana','Avocado',
-                'Tomato','Strawberry','Chocolate','Garlic','Onion'
-            ],
-            'fitnessGoals' => ['Lose Weight','Maintain','Build Muscle','Improve Endurance','Recomposition'],
-            'dietaryGoals' => ['Calorie Deficit','Maintenance','Calorie Surplus','Balanced Nutrition'],
-        ]);
+        return inertia('Auth/RegisterWizard');
     }
 
+    /**
+     * Handle final submit from the multi-step register wizard.
+     */
     public function store(Request $request)
     {
+        // Validate everything the wizard collects
         $data = $request->validate([
-            'first_name' => ['required','string','max:100'],
-            'last_name'  => ['required','string','max:100'],
-            'username'   => ['nullable','string','max:50', Rule::unique('users','username')],
-            'gender'     => ['nullable', Rule::in(['male','female','other'])],
-            'age'        => ['nullable','integer','min:1','max:120'],
-            'height_cm'  => ['nullable','integer','min:50','max:300'],
-            'weight_kg'  => ['nullable','numeric','min:10','max:500'],
+            // account
+            'email'                 => ['required','email','max:255', Rule::unique('users','email')],
+            'password'              => ['required','string','min:8','max:255'],
+            'username'              => ['nullable','string','max:50', Rule::unique('users','username')],
 
-            'dietary_goal' => ['nullable','string','max:100'],
-            'fitness_goal' => ['nullable','string','max:100'],
-            'diet_name'    => ['nullable','string','max:100'],
-            'allergies'    => ['nullable','array'],
-            'allergies.*'  => ['string','max:100'],
+            // profile
+            'first_name'            => ['required','string','max:100'],
+            'last_name'             => ['required','string','max:100'],
+            'gender'                => ['nullable','string','max:25'],
+            'age'                   => ['nullable','integer','min:10','max:120'],
+            'height_cm'             => ['nullable','numeric','min:50','max:260'],
+            'weight_kg'             => ['nullable','numeric','min:20','max:500'],
 
-            'email'    => ['required','email','max:255', Rule::unique('users','email')],
-            'password' => ['required','string','min:8','confirmed'],
+            // health
+            'has_medical_history'   => ['required','boolean'],
+            'medical_history'       => ['nullable','string','max:2000'],
+
+            // diet & fitness choices
+            'dietary_goal'          => ['nullable','string','max:100'],    // e.g. "Calorie Deficit"
+            'fitness_goal'          => ['nullable','string','max:100'],    // e.g. "Build Muscle"
+            'diet_name'             => ['nullable','string','max:100'],    // e.g. "Mediterranean"
+            'allergies'             => ['nullable','array'],
+            'allergies.*'           => ['string','max:100'],
+
+            // past diet attempts
+            'tried_diet_before'     => ['nullable','in:yes,no'],
+            'diet_failure_reasons'  => ['nullable','array'],
+            'diet_failure_reasons.*'=> ['string','max:100'],
+            'diet_failure_other'    => ['nullable','string','max:255'],
         ]);
 
-        $user = User::create([
-            'first_name' => $data['first_name'],
-            'last_name'  => $data['last_name'],
-            'username'   => $data['username'] ?? null,
-            'gender'     => $data['gender'] ?? null,
-            'age'        => $data['age'] ?? null,
-            'height_cm'  => $data['height_cm'] ?? null,
-            'weight_kg'  => $data['weight_kg'] ?? null,
+        // Ensure arrays default to [] so JSON columns are always consistent
+        $data['allergies']            = $data['allergies'] ?? [];
+        $data['diet_failure_reasons'] = $data['diet_failure_reasons'] ?? [];
 
-            'dietary_goal' => $data['dietary_goal'] ?? null,
-            'fitness_goal' => $data['fitness_goal'] ?? null,
-            'diet_name'    => $data['diet_name'] ?? null,
-            'allergies'    => $data['allergies'] ?? null, // casted to JSON by model
+        // Hash password
+        $plainPassword = $data['password'];
+        $data['password'] = Hash::make($plainPassword);
 
-            'email'    => $data['email'],
-            'password' => Hash::make($data['password']),
-            'name' => $request->first_name . ' ' . $request->last_name,
-        ]);
+        // Create the user (no `name` column!)
+        $user = DB::transaction(function () use ($data) {
+            return User::create([
+                'email'                => $data['email'],
+                'password'             => $data['password'],
+                'username'             => $data['username'] ?? null,
 
-        event(new Registered($user));
-        Auth::login($user, false);
-        
+                'first_name'           => $data['first_name'],
+                'last_name'            => $data['last_name'],
+                'gender'               => $data['gender'] ?? null,
+                'age'                  => $data['age'] ?? null,
+                'height_cm'            => $data['height_cm'] ?? null,
+                'weight_kg'            => $data['weight_kg'] ?? null,
 
+                'has_medical_history'  => (bool) $data['has_medical_history'],
+                'medical_history'      => $data['medical_history'] ?? null,
 
-    // Option A (strict): do NOT auto-login
-    return redirect()->route('login')->with('status', 'Account created. Please log in.');
-    // Option B: keep Auth::login($user, false);  // still fine with step #2 in place
+                'dietary_goal'         => $data['dietary_goal'] ?? null,
+                'fitness_goal'         => $data['fitness_goal'] ?? null,
+                'diet_name'            => $data['diet_name'] ?? null,
+                'allergies'            => $data['allergies'],
+                'tried_diet_before'    => $data['tried_diet_before'] ?? null,
+                'diet_failure_reasons' => $data['diet_failure_reasons'],
+                'diet_failure_other'   => $data['diet_failure_other'] ?? null,
+            ]);
+        });
 
+        // Log them in and redirect
+        Auth::login($user);
+
+        // If you're using Laravel's login response, you could also regenerate the session:
+        $request->session()->regenerate();
+
+        return redirect()->intended('/home');
     }
 }

@@ -13,34 +13,39 @@ class HomeController extends Controller
 {
     public function index()
     {
-        $user = Auth::user();
+        $user  = Auth::user();
+        $today = now()->toDateString();
 
-        // Profile for BMI
+        // ---- User profile (for BMI) ----
         $profile = $user ? [
             'age'       => isset($user->age) ? (int) $user->age : null,
             'height_cm' => isset($user->height_cm) ? (float) $user->height_cm : null,
             'weight_kg' => isset($user->weight_kg) ? (float) $user->weight_kg : null,
         ] : null;
 
-        // Today's date (ensure app.timezone is correct)
-        $today = now()->format('Y-m-d');
-
-        // Today's water
-        $todayMl = $user
-            ? (WaterIntake::where('user_id', $user->id)
-                ->where('day', $today)
-                ->value('ml') ?? 0)
-            : 0;
-
-        $targetMl = ($user && is_numeric($user->weight_kg))
-            ? (int) round($user->weight_kg * 30)
-            : 2000;
-
-        // ---- Today's meals + latest fallback (legacy MealLog view) ----
-        $todayLog = null;
-        $latestLog = null;
+        // ---- Water intake (guard table existence) ----
+        $todayMl  = 0;
+        $targetMl = 2000;
 
         if ($user) {
+            if (is_numeric($user->weight_kg)) {
+                $targetMl = (int) round(((float) $user->weight_kg) * 30);
+            }
+
+            if (Schema::hasTable('water_intakes')) {
+                $todayMl = (int) (
+                    WaterIntake::where('user_id', $user->id)
+                        ->whereDate('day', $today)
+                        ->value('ml') ?? 0
+                );
+            }
+        }
+
+        // ---- Legacy MealLog (today or latest) ----
+        $todayLog  = null;
+        $latestLog = null;
+
+        if ($user && Schema::hasTable('meal_logs')) {
             $log = MealLog::with('items')
                 ->where('user_id', $user->id)
                 ->whereDate('consumed_at', $today)
@@ -49,10 +54,10 @@ class HomeController extends Controller
             if ($log) {
                 $todayLog = [
                     'id'          => $log->id,
-                    'consumed_at' => $log->consumed_at ? $log->consumed_at->format('Y-m-d') : null,
-                    'photo_url'   => $log->photo_path ? asset('storage/'.$log->photo_path) : null,
+                    'consumed_at' => optional($log->consumed_at)->format('Y-m-d'),
+                    'photo_url'   => $log->photo_path ? asset('storage/' . ltrim($log->photo_path, '/')) : null,
                     'other_notes' => $log->other_notes,
-                    'items'       => $log->items->map(fn($i) => [
+                    'items'       => $log->items->map(fn ($i) => [
                         'category' => $i->category,
                         'label'    => $i->label,
                         'quantity' => $i->quantity,
@@ -68,10 +73,10 @@ class HomeController extends Controller
                 if ($last) {
                     $latestLog = [
                         'id'          => $last->id,
-                        'consumed_at' => $last->consumed_at ? $last->consumed_at->format('Y-m-d') : null,
-                        'photo_url'   => $last->photo_path ? asset('storage/'.$last->photo_path) : null,
+                        'consumed_at' => optional($last->consumed_at)->format('Y-m-d'),
+                        'photo_url'   => $last->photo_path ? asset('storage/' . ltrim($last->photo_path, '/')) : null,
                         'other_notes' => $last->other_notes,
-                        'items'       => $last->items->map(fn($i) => [
+                        'items'       => $last->items->map(fn ($i) => [
                             'category' => $i->category,
                             'label'    => $i->label,
                             'quantity' => $i->quantity,
@@ -82,7 +87,7 @@ class HomeController extends Controller
             }
         }
 
-        // ---- NEW: Today macros + per-meal totals from meal_entries + foods ----
+        // ---- New meal_entries/foods daily macros (guard tables) ----
         $todayMacros = null;
         $mealTotals  = null;
 
@@ -107,7 +112,7 @@ class HomeController extends Controller
                 'fat'      => (float) ($daily->fat      ?? 0),
             ];
 
-            $byMealRaw = DB::table('meal_entries as me')
+            $byMeal = DB::table('meal_entries as me')
                 ->join('foods as f', 'f.id', '=', 'me.food_id')
                 ->selectRaw("
                     me.meal_type,
@@ -121,6 +126,7 @@ class HomeController extends Controller
                 ->groupBy('me.meal_type')
                 ->get();
 
+            // Ensure keys exist even if no rows for a given meal_type
             $mealTotals = [
                 'breakfast' => ['calories'=>0,'protein'=>0,'carbs'=>0,'fat'=>0],
                 'lunch'     => ['calories'=>0,'protein'=>0,'carbs'=>0,'fat'=>0],
@@ -129,8 +135,12 @@ class HomeController extends Controller
                 'drink'     => ['calories'=>0,'protein'=>0,'carbs'=>0,'fat'=>0],
             ];
 
-            foreach ($byMealRaw as $row) {
-                $mealTotals[$row->meal_type] = [
+            foreach ($byMeal as $row) {
+                $type = (string) $row->meal_type;
+                if (!array_key_exists($type, $mealTotals)) {
+                    $mealTotals[$type] = ['calories'=>0,'protein'=>0,'carbs'=>0,'fat'=>0];
+                }
+                $mealTotals[$type] = [
                     'calories' => (float) $row->calories,
                     'protein'  => (float) $row->protein,
                     'carbs'    => (float) $row->carbs,
@@ -139,6 +149,7 @@ class HomeController extends Controller
             }
         }
 
+        // ✅ Always return an Inertia page (never JSON)
         return Inertia::render('Home', [
             'userProfile' => $profile,
             'water'       => ['today_ml' => $todayMl, 'target_ml' => $targetMl],

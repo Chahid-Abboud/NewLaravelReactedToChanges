@@ -48,6 +48,15 @@ return [
 
     'user_agent'     => env('OVERPASS_USER_AGENT', 'Hayetak/1.0 (+contact)'),
 ],
+'mapbox' => [
+    // This one is fine to expose in client (public token), but keep it in .env anyway
+    'token' => env('VITE_MAPBOX_TOKEN'),
+],
+
+'foursquare' => [
+    // Keep this private, never expose in React directly
+    'api_key' => env('FOURSQUARE_API_KEY'),
+],
 
 
 ];

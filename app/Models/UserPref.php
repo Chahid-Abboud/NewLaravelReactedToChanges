@@ -1,16 +1,29 @@
-<?php 
-// app/Models/UserPref.php
-namespace App\Models;
-use Illuminate\Database\Eloquent\Model;
+<?php
 
-class UserPref extends Model {
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+class UserPref extends Model
+{
     protected $table = 'user_prefs';
+
     protected $fillable = [
-        'user_id','dietary_goal','fitness_goals','allergies','diet_type','diet_other'
+        'user_id',
+        'dietary_goal',        // string
+        'fitness_goal',        // string (singular for consistency)
+        'allergies',           // JSON
+        'diet_name',           // string
+        'diet_failure_other',  // optional extra
     ];
+
     protected $casts = [
-        'fitness_goals' => 'array',
         'allergies' => 'array',
     ];
-    public function user(){ return $this->belongsTo(\App\Models\User::class); }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
 }
