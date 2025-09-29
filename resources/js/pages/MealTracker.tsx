@@ -225,7 +225,12 @@ export default function MealTracker() {
               target={targets?.fat}
             />
           </div>
-          
+
+          {!targets && (
+            <div className="mt-3 text-xs text-[#1C2C64]/70">
+              Tip: pass <code>targets</code> from your controller (e.g., based on BMI &amp; goals) to enable percentages.
+            </div>
+          )}
         </section>
 
         {/* Meal type tabs */}
@@ -492,7 +497,7 @@ export default function MealTracker() {
               <button
                 onClick={confirmAdd}
                 className="rounded-lg border border-[#1C2C64] bg-[#1C2C64] px-3 py-1.5 text-sm text-white"
-              >
+                >
                 Add to {category}
               </button>
             </div>
@@ -503,7 +508,7 @@ export default function MealTracker() {
   );
 }
 
-/** ---------- Small UI Card WITH progress ---------- */
+/** ---------- Small UI Card WITH progress (WaterCard-style) ---------- */
 function StatCard({
   label,
   value,
@@ -518,48 +523,60 @@ function StatCard({
   unit?: "kcal" | "g";
 }) {
   const hasTarget = typeof target === "number" && target > 0 && typeof consumed === "number";
-  const pct = hasTarget ? Math.round((consumed! / target!) * 100) : 0;
-  const basePct = hasTarget ? Math.min(100, pct) : 0;
-  const overflowPct = hasTarget ? Math.max(0, pct - 100) : 0;
+
+  // Same math as WaterCard: base (0–100) + overflow strip (>100)
+  const rawPct = hasTarget ? (consumed! / Math.max(1, target!)) * 100 : 0;
+  const pct = Math.max(0, Math.round(rawPct)); // can exceed 100
+  const basePct = Math.min(100, pct);
+  const overflowPct = Math.min(100, Math.max(0, pct - 100));
+
+  // Color logic consistent with WaterCard feedback
+  // <50%: destructive; 50–80%: accent; >80%: secondary
+  let fillClass = "bg-accent";
+  if (pct < 50) fillClass = "bg-destructive";
+  else if (pct > 80) fillClass = "bg-secondary";
 
   return (
     <div className="rounded-xl border border-[#1C2C64]/20 p-4">
       <div className="text-xs uppercase tracking-wide text-[#1C2C64]/70">{label}</div>
       <div className="text-lg font-semibold text-[#1C2C64]">{value}</div>
 
-      {/* embedded progress bar */}
-      <div
-        className="mt-3"
-        aria-label={`${label} progress`}
-        aria-valuemin={0}
-        aria-valuemax={hasTarget ? 100 : undefined}
-        aria-valuenow={hasTarget ? Math.min(999, pct) : undefined}
-        role="progressbar"
-      >
-        <div className="relative h-2 w-full rounded bg-[#1C2C64]/10">
-          {hasTarget && (
-            <div
-              className="absolute inset-y-0 left-0 rounded"
-              style={{ width: `${basePct}%`, backgroundColor: "#1C2C64" }}
-              aria-hidden
-            />
-          )}
-        </div>
-
+      {/* progress area */}
+      <div className="mt-3">
+        {/* Overflow strip (above) */}
         {hasTarget && overflowPct > 0 && (
-          <div className="mt-1">
-            <div className="h-1.5 w-full rounded bg-[#1C2C64]/10" />
-            <div
-              className="relative -mt-1.5 h-1.5 rounded"
-              style={{ width: `${Math.min(100, overflowPct)}%`, backgroundColor: "#F59E0B" }}
-              aria-hidden
-            />
+          <div className="mb-1">
+            <div className="h-1.5 w-full rounded bg-muted">
+              <div
+                className="h-1.5 rounded bg-amber-500"
+                style={{ width: `${overflowPct}%`, transition: "width 300ms ease" }}
+                role="progressbar"
+                aria-label={`${label} overflow`}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={overflowPct}
+              />
+            </div>
+            <div className="mt-1 text-[11px] leading-none text-amber-600">+{overflowPct}%</div>
           </div>
         )}
 
+        {/* Main bar (0–100%) */}
+        <div className="h-2 w-full rounded bg-muted">
+          <div
+            className={`h-2 rounded ${hasTarget ? fillClass : "bg-muted"}`}
+            style={{ width: hasTarget ? `${basePct}%` : "0%", transition: "width 300ms ease" }}
+            role="progressbar"
+            aria-label={`${label} progress`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={hasTarget ? basePct : undefined}
+          />
+        </div>
+
         <div className="mt-1 text-[11px] text-[#1C2C64]/70">
           {hasTarget
-            ? `${Math.round(consumed!)} ${unit} / ${Math.round(target!)} ${unit} (${Math.min(999, pct)}%)`
+            ? `${Math.round(consumed!)} ${unit} / ${Math.round(target!)} ${unit} (${pct}%)`
             : `No target provided for ${label.toLowerCase()}.`}
         </div>
       </div>

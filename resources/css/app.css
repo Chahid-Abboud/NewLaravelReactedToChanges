@@ -8,159 +8,163 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-    --font-sans:
-        'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
+  --font-sans:
+    'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
 
-    --radius-lg: var(--radius);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-sm: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
 
-    --color-background: var(--background);
-    --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
 
-    --color-card: var(--card);
-    --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
 
-    --color-popover: var(--popover);
-    --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
 
-    --color-primary: var(--primary);
-    --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
 
-    --color-secondary: var(--secondary);
-    --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
 
-    --color-muted: var(--muted);
-    --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
 
-    --color-accent: var(--accent);
-    --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
 
-    --color-destructive: var(--destructive);
-    --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
 
-    --color-border: var(--border);
-    --color-input: var(--input);
-    --color-ring: var(--ring);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
 
-    --color-chart-1: var(--chart-1);
-    --color-chart-2: var(--chart-2);
-    --color-chart-3: var(--chart-3);
-    --color-chart-4: var(--chart-4);
-    --color-chart-5: var(--chart-5);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
 
-    --color-sidebar: var(--sidebar);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* ----------------- LIGHT MODE (root) ----------------- */
+/* Teal/Emerald brand; background = white with a soft green hint */
 :root {
-    /* Nutrition/health theme — warm light, clean navy, leafy green, hydration teal */
-    --background: oklch(0.96 0.03 85);           /* warm cream (not white) */
-    --foreground: oklch(0.18 0.02 260);          /* deep slate text */
+  /* Soft minty white: very light with slight green hue */
+  /* (oklch chosen to be display-consistent; hex fallback included) */
+  --background: oklch(0.985 0.015 145);
+  /* Fallback if oklch unsupported */
+  /* --background: #F6FFF8; */
 
-    --card: oklch(0.965 0.02 90);
-    --card-foreground: oklch(0.18 0.02 260);
+  --foreground: #0F172A;              /* slate-900 */
 
-    --popover: oklch(0.965 0.02 90);
-    --popover-foreground: oklch(0.18 0.02 260);
+  --card: #FFFFFF;
+  --card-foreground: #0F172A;
 
-    --primary: oklch(0.36 0.05 260);             /* navy (trustworthy/clinical) */
-    --primary-foreground: oklch(0.98 0.01 95);   /* light text on primary */
+  --popover: #FFFFFF;
+  --popover-foreground: #0F172A;
 
-    --secondary: oklch(0.68 0.12 150);           /* leafy green (nutrition/progress) */
-    --secondary-foreground: oklch(0.18 0.02 150);
+  /* Brand actions */
+  --primary: #0EA5A4;                 /* teal-600 */
+  --primary-foreground: #F0FDFA;      /* teal-50 */
 
-    --muted: oklch(0.94 0.02 95);
-    --muted-foreground: oklch(0.55 0.03 250);
+  --secondary: #10B981;               /* emerald-600 */
+  --secondary-foreground: #ECFDF5;    /* emerald-50 */
 
-    --accent: oklch(0.75 0.10 210);              /* hydration teal */
-    --accent-foreground: oklch(0.20 0.02 210);
+  /* Subtle UI helpers */
+  --muted: #F3F4F6;                   /* gray-100 */
+  --muted-foreground: #475569;        /* slate-600 */
 
-    --destructive: oklch(0.62 0.22 25);          /* health alert red/orange */
-    --destructive-foreground: oklch(0.98 0.01 95);
+  --accent: #F59E0B;                  /* amber-500 (sparingly) */
+  --accent-foreground: #1F2937;       /* gray-800 */
 
-    --border: oklch(0.88 0.02 95);
-    --input: oklch(0.88 0.02 95);
-    --ring: oklch(0.72 0.08 210);                /* teal focus ring */
+  --destructive: #EF4444;             /* red-500 */
+  --destructive-foreground: #FEF2F2;  /* rose-50 */
 
-    /* Charts aligned to the palette */
-    --chart-1: oklch(0.68 0.12 150);             /* green */
-    --chart-2: oklch(0.75 0.10 210);             /* teal */
-    --chart-3: oklch(0.44 0.07 260);             /* blue/navy */
-    --chart-4: oklch(0.80 0.18 84);              /* orange (energy) */
-    --chart-5: oklch(0.73 0.16 50);              /* golden (grain) */
+  --border: #E5E7EB;                  /* gray-200 */
+  --input: #E5E7EB;
+  --ring: #0EA5A4;                    /* teal focus ring */
 
-    --radius: 0.625rem;
+  /* Charts */
+  --chart-1: #10B981;                 /* emerald */
+  --chart-2: #0EA5A4;                 /* teal */
+  --chart-3: #6366F1;                 /* indigo */
+  --chart-4: #F59E0B;                 /* amber */
+  --chart-5: #F97316;                 /* orange */
 
-    /* Use sidebar tokens for header/nav surfaces if applicable */
-    --sidebar: oklch(0.36 0.05 260);             /* navy header/nav */
-    --sidebar-foreground: oklch(0.98 0.01 95);
-    --sidebar-primary: oklch(0.68 0.12 150);     /* green action */
-    --sidebar-primary-foreground: oklch(0.18 0.02 150);
-    --sidebar-accent: oklch(0.75 0.10 210);      /* teal accent */
-    --sidebar-accent-foreground: oklch(0.20 0.02 210);
-    --sidebar-border: oklch(0.62 0.03 260);
-    --sidebar-ring: oklch(0.72 0.08 210);
+  --radius: 0.625rem;
+
+  /* Header / nav surfaces */
+  --sidebar: #0F172A;                 /* slate-900 bar */
+  --sidebar-foreground: #E5E7EB;      /* gray-200 text */
+  --sidebar-primary: #0EA5A4;         /* teal CTA */
+  --sidebar-primary-foreground: #F0FDFA;
+  --sidebar-accent: #10B981;          /* emerald accent */
+  --sidebar-accent-foreground: #ECFDF5;
+  --sidebar-border: #1F2937;          /* gray-800 */
+  --sidebar-ring: #0EA5A4;
 }
 
+/* ----------------- DARK MODE (.dark) ----------------- */
 .dark {
-    /* Dark mode counterparts preserving the same mood */
-    --background: oklch(0.18 0.03 260);          /* deep navy-slate */
-    --foreground: oklch(0.98 0.01 95);
+  --background: #0B1020;              /* deep slate/navy */
+  --foreground: #E6EDF5;              /* light slate */
 
-    --card: oklch(0.19 0.03 260);
-    --card-foreground: oklch(0.98 0.01 95);
+  --card: #111827;                    /* gray-900 */
+  --card-foreground: #E6EDF5;
 
-    --popover: oklch(0.19 0.03 260);
-    --popover-foreground: oklch(0.98 0.01 95);
+  --popover: #111827;
+  --popover-foreground: #E6EDF5;
 
-    --primary: oklch(0.86 0.05 230);             /* lighter brand for dark bg */
-    --primary-foreground: oklch(0.20 0.02 230);
+  /* Lighten brand hues in dark for contrast */
+  --primary: #2DD4BF;                 /* teal-400 */
+  --primary-foreground: #062726;
 
-    --secondary: oklch(0.70 0.13 150);           /* vivid green for dark */
-    --secondary-foreground: oklch(0.12 0.02 150);
+  --secondary: #34D399;               /* emerald-400 */
+  --secondary-foreground: #062014;
 
-    --muted: oklch(0.28 0.03 260);
-    --muted-foreground: oklch(0.72 0.03 260);
+  --muted: #1F2937;                   /* gray-800 */
+  --muted-foreground: #C7D2FE;        /* soft indigo for subtle text */
 
-    --accent: oklch(0.74 0.10 210);              /* teal pop */
-    --accent-foreground: oklch(0.12 0.02 210);
+  --accent: #FBBF24;                  /* amber-400 */
+  --accent-foreground: #111827;
 
-    --destructive: oklch(0.64 0.22 25);
-    --destructive-foreground: oklch(0.98 0.01 95);
+  --destructive: #F87171;             /* red-400 */
+  --destructive-foreground: #1A0B0B;
 
-    --border: oklch(0.30 0.03 260);
-    --input: oklch(0.30 0.03 260);
-    --ring: oklch(0.62 0.08 210);
+  --border: #273449;                  /* slate border */
+  --input: #273449;
+  --ring: #2DD4BF;                    /* teal ring */
 
-    --chart-1: oklch(0.70 0.13 150);
-    --chart-2: oklch(0.74 0.10 210);
-    --chart-3: oklch(0.58 0.06 260);
-    --chart-4: oklch(0.75 0.17 84);
-    --chart-5: oklch(0.70 0.15 50);
+  --chart-1: #34D399;                 /* emerald */
+  --chart-2: #2DD4BF;                 /* teal */
+  --chart-3: #A5B4FC;                 /* indigo-300 */
+  --chart-4: #FBBF24;                 /* amber-400 */
+  --chart-5: #FB923C;                 /* orange-400 */
 
-    --sidebar: oklch(0.18 0.03 260);             /* dark navy header/nav */
-    --sidebar-foreground: oklch(0.98 0.01 95);
-    --sidebar-primary: oklch(0.70 0.13 150);
-    --sidebar-primary-foreground: oklch(0.12 0.02 150);
-    --sidebar-accent: oklch(0.74 0.10 210);
-    --sidebar-accent-foreground: oklch(0.12 0.02 210);
-    --sidebar-border: oklch(0.34 0.03 260);
-    --sidebar-ring: oklch(0.62 0.08 210);
+  --sidebar: #0B132B;
+  --sidebar-foreground: #DCE4F2;
+  --sidebar-primary: #2DD4BF;
+  --sidebar-primary-foreground: #052021;
+  --sidebar-accent: #34D399;
+  --sidebar-accent-foreground: #051A11;
+  --sidebar-border: #1A2340;
+  --sidebar-ring: #2DD4BF;
 }
 
 @layer base {
-    * {
-        @apply border-border;
-    }
-
-    body {
-        @apply bg-background text-foreground;
-    }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground; }
 }

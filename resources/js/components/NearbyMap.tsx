@@ -58,6 +58,12 @@ const GYM_COLOR = "#2563eb";          // blue-600
 const NUTRI_COLOR = "#10b981";        // emerald-500
 const OTHER_COLOR = "#6b7280";        // gray-500
 
+// ---- Radius limits (clamp to 10km max) ----
+const MIN_RADIUS_M = 100;      // 100 m minimum to avoid degenerate circle
+const MAX_RADIUS_M = 10000;    // 10 km maximum
+const clampRadius = (r: number) =>
+  Math.max(MIN_RADIUS_M, Math.min(MAX_RADIUS_M, r));
+
 const colorExpression: any = [
   "match",
   ["downcase", ["get", "category"]],
@@ -77,7 +83,10 @@ function ensureUid(features: PoiFeature[]): PoiFeature[] {
       ...f,
       properties: {
         ...f.properties,
-        _uid: id != null ? String(id) : `${name}-${lng.toFixed(5)}-${lat.toFixed(5)}-${i}`,
+        _uid:
+          id != null
+            ? String(id)
+            : `${name}-${lng.toFixed(5)}-${lat.toFixed(5)}-${i}`,
       },
     };
   });
@@ -104,11 +113,12 @@ const NearbyMap = forwardRef<NearbyMapHandle, NearbyMapProps>(function NearbyMap
   const featuresRef = useRef<PoiFeature[]>([]);
   const selectedUidRef = useRef<string | null>(null);
 
-  // Circle polygon for fit + draw
+  // Circle polygon for fit + draw (uses clamped radius)
   const circlePoly = useMemo<Feature<Polygon> | null>(() => {
     if (!center) return null;
+    const r = clampRadius(radius);
     const c = turf.point([center[0], center[1]]);
-    const circle = turf.circle(c, radius / 1000, { steps: 128, units: "kilometers" });
+    const circle = turf.circle(c, r / 1000, { steps: 128, units: "kilometers" });
     return circle as Feature<Polygon>;
   }, [center, radius]);
 
@@ -142,9 +152,15 @@ const NearbyMap = forwardRef<NearbyMapHandle, NearbyMapProps>(function NearbyMap
       .setHTML(
         `<div style="min-width:220px">
           <div style="font-weight:600">${p.name || "(no name)"}</div>
-          <div style="font-size:12px;opacity:.8">${p.category || ""}${p.source ? ` · ${p.source}` : ""}</div>
+          <div style="font-size:12px;opacity:.8">${p.category || ""}${
+          p.source ? ` · ${p.source}` : ""
+        }</div>
           <div style="font-size:12px;margin-top:4px">${p.address || ""}</div>
-          ${p.website ? `<div style="margin-top:6px"><a href="${p.website}" target="_blank" rel="noreferrer">Website</a></div>` : ""}
+          ${
+            p.website
+              ? `<div style="margin-top:6px"><a href="${p.website}" target="_blank" rel="noreferrer">Website</a></div>`
+              : ""
+          }
         </div>`
       )
       .addTo(mapRef.current!);
@@ -213,21 +229,6 @@ const NearbyMap = forwardRef<NearbyMapHandle, NearbyMapProps>(function NearbyMap
         },
       });
 
-      // Click handler → popup + highlight
-      map.on("click", LAYER_POIS, (e) => {
-        const feat = e.features?.[0] as any;
-        if (!feat) return;
-        const coords = feat.geometry?.coordinates as [number, number];
-        const props = feat.properties || {};
-        selectedUidRef.current = String(props._uid ?? "");
-        map.setFilter(LAYER_POIS_SELECTED, ["==", ["get", "_uid"], selectedUidRef.current]);
-        showPopup(coords, {
-          type: "Feature",
-          geometry: { type: "Point", coordinates: coords },
-          properties: props,
-        } as PoiFeature);
-      });
-
       void fetchPois();
     });
 
@@ -262,11 +263,12 @@ const NearbyMap = forwardRef<NearbyMapHandle, NearbyMapProps>(function NearbyMap
     try {
       onFetchStart?.();
 
+      const r = clampRadius(radius); // ✅ cap to 10 km
       const baseUrl = apiBaseUrl ?? window.location.origin;
       const url = new URL(ENDPOINT, baseUrl);
       url.searchParams.set("lat", String(center[1]));
       url.searchParams.set("lng", String(center[0]));
-      url.searchParams.set("radius", String(radius));
+      url.searchParams.set("radius", String(r));
       url.searchParams.set("types", types);
 
       const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
@@ -312,15 +314,27 @@ const NearbyMap = forwardRef<NearbyMapHandle, NearbyMapProps>(function NearbyMap
         }}
       >
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{
-            width: 10, height: 10, borderRadius: "50%", background: GYM_COLOR, display: "inline-block"
-          }} />
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: "50%",
+              background: GYM_COLOR,
+              display: "inline-block",
+            }}
+          />
           gym
         </span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <span style={{
-            width: 10, height: 10, borderRadius: "50%", background: NUTRI_COLOR, display: "inline-block"
-          }} />
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: "50%",
+              background: NUTRI_COLOR,
+              display: "inline-block",
+            }}
+          />
           nutritionist
         </span>
       </div>

@@ -193,10 +193,14 @@ export default function Home() {
             </p>
           </div>
 
-          {/* 👇 Explore button that goes to the map page */}
+          {/* Explore button -> TEAL */}
           <Link
             href="/places"
-            className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700"
+            className="inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium"
+            style={{
+              backgroundColor: "var(--primary)",
+              color: "var(--primary-foreground)",
+            }}
           >
             Explore Nearby
           </Link>
@@ -209,14 +213,15 @@ export default function Home() {
               <h2 className="text-lg font-semibold">Today’s Macros</h2>
               <Link
                 href="/meal-tracker"
-                className="text-sm text-blue-600 hover:underline"
+                className="text-sm"
+                style={{ color: "var(--primary)" }}
               >
                 Open Meal Tracker
               </Link>
             </div>
 
             {/* Totals row */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
               <Stat label="Calories" value={`${round(macros.calories)} kcal`} />
               <Stat label="Protein" value={`${round(macros.protein)} g`} />
               <Stat label="Carbs" value={`${round(macros.carbs)} g`} />
@@ -224,7 +229,7 @@ export default function Home() {
             </div>
 
             {/* Per-meal row */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-5">
               {(
                 ["breakfast", "lunch", "dinner", "snack", "drink"] as const
               ).map((mt) => (
@@ -243,7 +248,7 @@ export default function Home() {
 
         {/* Health cards row */}
         <section>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             {/* BMI */}
             <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
               <div className="mb-4 flex items-center justify-between">
@@ -270,7 +275,7 @@ export default function Home() {
 
         {/* Log Workouts */}
         <section className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-xl font-semibold">Log Workouts</h2>
               <p className="text-gray-600">
@@ -279,21 +284,40 @@ export default function Home() {
               </p>
             </div>
             <div className="flex items-center gap-3">
+              {/* Start = TEAL */}
               <button
                 onClick={startTodayWorkout}
-                className="px-4 py-2 rounded-lg bg-green-600 text-white font-medium hover:bg-green-700"
+                className="rounded-lg px-4 py-2 font-medium"
+                style={{
+                  backgroundColor: "var(--primary)",
+                  color: "var(--primary-foreground)",
+                }}
               >
                 Start Today’s Workout
               </button>
+
+              {/* Open log = BLACK */}
               <button
                 onClick={() => router.visit("/workouts/log")}
-                className="px-4 py-2 rounded-lg bg-gray-900 text-white font-medium hover:bg-black"
+                className="rounded-lg px-4 py-2 font-medium text-white"
+                style={{
+                  backgroundColor: "var(--foreground)",
+                }}
               >
                 Open Workout Log
               </button>
+
+              {/* Planner = SOFT TEAL PILL */}
               <button
                 onClick={() => router.visit("/workouts/plan")}
-                className="px-4 py-2 rounded-lg bg-green-50 text-green-700 font-medium hover:bg-green-100"
+                className="rounded-lg px-4 py-2 font-medium"
+                style={{
+                  background:
+                    "color-mix(in oklab, var(--primary) 12%, white)",
+                  color:
+                    "color-mix(in oklab, var(--primary-foreground) 60%, var(--foreground))",
+                  border: "1px solid var(--border)",
+                }}
               >
                 Planner
               </button>
@@ -301,15 +325,15 @@ export default function Home() {
           </div>
 
           {/* Mini progress + motivation */}
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="rounded-xl border p-4 lg:col-span-2">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">
+              <h3 className="mb-2 text-sm font-semibold text-gray-700">
                 Weekly Progress (avg top-set weight)
               </h3>
               <ProgressMini />
             </div>
             <div className="rounded-xl border p-4">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">
+              <h3 className="mb-2 text-sm font-semibold text-gray-700">
                 Motivation
               </h3>
               <MotivationBox />
@@ -331,6 +355,7 @@ function Stat({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
 
 function ProgressMini() {
   const [series, setSeries] = useState<ProgressPoint[]>([]);
@@ -410,8 +435,8 @@ function MotivationBox() {
 
   return (
     <div className="text-sm">
-      <div className="font-semibold mb-1">{motivation.title}</div>
-      <ul className="list-disc pl-5 space-y-1">
+      <div className="mb-1 font-semibold">{motivation.title}</div>
+      <ul className="list-disc space-y-1 pl-5">
         {motivation.lines.map((l: string, i: number) => (
           <li key={i} dangerouslySetInnerHTML={{ __html: l }} />
         ))}

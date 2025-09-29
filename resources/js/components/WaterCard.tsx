@@ -10,13 +10,13 @@ type Props = {
 function Skeleton() {
   return (
     <div className="animate-pulse space-y-3">
-      <div className="h-4 w-40 bg-muted rounded" />
-      <div className="h-2 w-full bg-muted rounded" />
-      <div className="h-4 w-12 bg-muted rounded" />
+      <div className="h-4 w-40 rounded bg-muted" />
+      <div className="h-2 w-full rounded bg-muted" />
+      <div className="h-4 w-12 rounded bg-muted" />
       <div className="flex gap-2">
-        <div className="h-8 w-16 bg-muted rounded-lg" />
-        <div className="h-8 w-16 bg-muted rounded-lg" />
-        <div className="h-8 w-16 bg-muted rounded-lg" />
+        <div className="h-9 w-20 rounded-lg bg-muted" />
+        <div className="h-9 w-20 rounded-lg bg-muted" />
+        <div className="h-9 w-20 rounded-lg bg-muted" />
       </div>
     </div>
   );
@@ -25,71 +25,116 @@ function Skeleton() {
 export default function WaterCard({ isGuest, water, onQuickAdd, loading }: Props) {
   if (loading) return <Skeleton />;
 
-  const rawPct = (water.today_ml / Math.max(1, water.target_ml)) * 100;
-  const pct = Math.max(0, Math.round(rawPct));         // total percentage (can exceed 100)
-  const basePct = Math.min(100, pct);                  // fills main bar up to 100
-  const overflowPct = Math.min(100, Math.max(0, pct - 100)); // part shown in overflow bar
+  const pctFloat = (water.today_ml / Math.max(1, water.target_ml)) * 100;
+  const basePct       = Math.max(0, Math.min(100, pctFloat));   // 0..100
+  const overflowPct   = Math.max(0, Math.min(100, pctFloat - 100)); // 0..100
 
-  // Base bar color by hydration level
-  let fillClass = "bg-accent"; // default teal
-  if (pct < 50) fillClass = "bg-destructive"; // red under 50%
-  else if (pct > 80) fillClass = "bg-secondary"; // green near goal
+  const trackStyle: React.CSSProperties = {
+    position: "relative",
+    backgroundColor: "var(--muted)",
+    borderRadius: 999,
+    overflow: "hidden",
+  };
+
+  // Base (teal) fill
+  const fillStyle: React.CSSProperties = {
+    width: `${basePct}%`,
+    transition: "width 350ms ease",
+    borderRadius: 999,
+    backgroundImage:
+      "linear-gradient(90deg, var(--primary), color-mix(in oklab, var(--primary) 60%, var(--secondary)))",
+  };
+
+  // Overflow (danger) — INSIDE the bar, grows from LEFT → RIGHT
+  const overStyle: React.CSSProperties | undefined =
+    overflowPct > 0
+      ? {
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: 0,                                 // start at the left edge
+          width: `${overflowPct}%`,                // grow L → R
+          zIndex: 2,
+          backgroundImage:
+            "repeating-linear-gradient(135deg, #EF4444, #EF4444 6px, #DC2626 6px, #DC2626 12px)",
+          opacity: 0.8,
+          borderRadius: 999,
+          mixBlendMode: "multiply",
+        }
+      : undefined;
+
+  const capStyle: React.CSSProperties = {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: basePct > 0 ? 6 : 0,
+    borderRadius: "0 999px 999px 0",
+    backgroundColor: "color-mix(in oklab, var(--primary) 85%, black)",
+    opacity: 0.25,
+  };
+
+  const SoftTealBtn: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+    className = "",
+    style,
+    ...rest
+  }) => (
+    <button
+      {...rest}
+      className={`rounded-lg px-3 py-2 text-sm font-medium border ${className}`}
+      style={{
+        background: "color-mix(in oklab, var(--primary) 12%, white)",
+        color:
+          "color-mix(in oklab, var(--primary-foreground) 60%, var(--foreground))",
+        borderColor: "var(--border)",
+        ...style,
+      }}
+    />
+  );
 
   return (
     <div>
       <div className="text-sm text-muted-foreground">
-        Today: <span className="font-semibold text-foreground">{water.today_ml}</span> /{" "}
-        {water.target_ml} ml
+        Today:{" "}
+        <span className="font-semibold text-foreground">{water.today_ml}</span>{" "}
+        / {water.target_ml} ml
       </div>
 
-      {/* progress */}
       <div className="mt-3">
-        {/* Overflow bar (appears ABOVE main bar) */}
-        {overflowPct > 0 && (
-          <div className="mb-1">
-            <div className="h-1.5 w-full rounded bg-muted">
-              <div
-                className="h-1.5 rounded bg-amber-500"
-                style={{ width: `${overflowPct}%`, transition: "width 300ms ease" }}
-                role="progressbar"
-                aria-label="Water overflow"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={overflowPct}
-              />
-            </div>
-            <div className="mt-1 text-[11px] leading-none text-amber-600">
-              +{overflowPct}%
-            </div>
+        <div
+          className="relative h-2 w-full"
+          style={trackStyle}
+          role="progressbar"
+          aria-label="Water progress"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(Math.min(100, pctFloat))}
+        >
+          {/* base fill */}
+          <div className="absolute inset-y-0 left-0 z-[1]" style={fillStyle}>
+            <div style={capStyle} />
           </div>
-        )}
 
-        {/* Main bar (0–100%) */}
-        <div className="h-2 w-full rounded bg-muted">
-          <div
-            className={`h-2 rounded ${fillClass}`}
-            style={{ width: `${basePct}%`, transition: "width 300ms ease" }}
-            role="progressbar"
-            aria-label="Water progress"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={basePct}
-          />
+          {/* overflow fill (inside, left→right) */}
+          {overStyle && <div style={overStyle} aria-hidden />}
         </div>
 
-        <div className="text-xs text-muted-foreground mt-1">{pct}%</div>
+        <div className="mt-1 text-xs text-muted-foreground">
+          {Math.round(pctFloat)}%{" "}
+          {overflowPct > 0 && (
+            <span style={{ color: "var(--destructive)" }}>
+              (+{Math.round(overflowPct)}%)
+            </span>
+          )}
+        </div>
       </div>
 
       {!isGuest && onQuickAdd && (
-        <div className="flex gap-2 mt-4">
+        <div className="mt-4 flex gap-2">
           {[250, 500, 750].map((ml) => (
-            <button
-              key={ml}
-              onClick={() => onQuickAdd(ml)}
-              className="px-3 py-1 rounded-lg bg-accent text-accent-foreground font-medium shadow hover:opacity-90 transition"
-            >
+            <SoftTealBtn key={ml} onClick={() => onQuickAdd(ml)}>
               +{ml} ml
-            </button>
+            </SoftTealBtn>
           ))}
         </div>
       )}

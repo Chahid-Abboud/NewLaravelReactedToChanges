@@ -1,5 +1,5 @@
 // resources/js/components/ElasticSlider.tsx
-import React, { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import React, { useLayoutEffect, useMemo, useRef } from "react";
 import { motion, useMotionValue, useSpring, animate } from "framer-motion";
 
 type Props = {
@@ -19,6 +19,9 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+// 🔒 Hard cap for radius slider (10 km)
+const HARD_MAX = 10000;
+
 export default function ElasticSlider({
   value,
   min,
@@ -32,6 +35,9 @@ export default function ElasticSlider({
 }: Props) {
   const trackRef = useRef<HTMLDivElement | null>(null);
 
+  const effectiveMin = min;
+  const effectiveMax = Math.min(max, HARD_MAX);
+
   // position in pixels of the thumb relative to track
   const x = useMotionValue(0);
   const xSpring = useSpring(x, { stiffness: 400, damping: 30, mass: 0.3 });
@@ -40,10 +46,11 @@ export default function ElasticSlider({
   const squish = useMotionValue(1);
   const squishSpring = useSpring(squish, { stiffness: 300, damping: 20 });
 
-  // compute percentage based on value
-  const pct = useMemo(() => (value - min) / (max - min), [value, min, max]);
+  const pct = useMemo(
+    () => (value - effectiveMin) / (effectiveMax - effectiveMin),
+    [value, effectiveMin, effectiveMax]
+  );
 
-  // when value changes from the outside, animate the thumb to that spot
   useLayoutEffect(() => {
     const track = trackRef.current;
     if (!track) return;
@@ -58,32 +65,31 @@ export default function ElasticSlider({
     if (!track) return value;
     const rect = track.getBoundingClientRect();
     const rel = clamp(clientX - rect.left, 0, rect.width);
-    const raw = min + (rel / rect.width) * (max - min);
-    // round to step
+    const raw = effectiveMin + (rel / rect.width) * (effectiveMax - effectiveMin);
     const stepped = Math.round(raw / step) * step;
-    return clamp(stepped, min, max);
+    return clamp(stepped, effectiveMin, effectiveMax);
   }
 
   // pointer handlers
   function onPointerDown(e: React.PointerEvent) {
     (e.target as Element).setPointerCapture?.(e.pointerId);
-    squish.set(1.15); // squish a bit
+    squish.set(1.15);
     onChange(pixelToValue(e.clientX));
   }
   function onPointerMove(e: React.PointerEvent) {
-    if (e.buttons !== 1) return; // only while pressed
+    if (e.buttons !== 1) return;
     onChange(pixelToValue(e.clientX));
   }
   function onPointerUp() {
-    squish.set(1); // relax
+    squish.set(1);
   }
 
   // keyboard accessibility
   function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "ArrowLeft") onChange(clamp(value - step, min, max));
-    if (e.key === "ArrowRight") onChange(clamp(value + step, min, max));
-    if (e.key === "Home") onChange(min);
-    if (e.key === "End") onChange(max);
+    if (e.key === "ArrowLeft") onChange(clamp(value - step, effectiveMin, effectiveMax));
+    if (e.key === "ArrowRight") onChange(clamp(value + step, effectiveMin, effectiveMax));
+    if (e.key === "Home") onChange(effectiveMin);
+    if (e.key === "End") onChange(effectiveMax);
   }
 
   return (
@@ -92,44 +98,43 @@ export default function ElasticSlider({
 
       <div
         ref={trackRef}
-        className="relative w-full rounded-full bg-muted"
+        className="relative w-full rounded-full bg-slate-200/70 dark:bg-slate-800/70"
         style={{ height }}
         role="slider"
-        aria-valuemin={min}
-        aria-valuemax={max}
-        aria-valuenow={value}
+        aria-valuemin={effectiveMin}
+        aria-valuemax={effectiveMax}
+        aria-valuenow={Math.min(value, effectiveMax)}
         tabIndex={0}
         onKeyDown={onKeyDown}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
-        {/* progress fill */}
+        {/* progress fill — same palette as header: navy → teal */}
         <motion.div
-          className="absolute left-0 top-0 rounded-full bg-[#1C2C64]"
+          className="absolute left-0 top-0 rounded-full bg-gradient-to-r from-[#1C2C64] to-teal-600"
           style={{ width: xSpring, height }}
         />
 
-        {/* thumb */}
+        {/* thumb — white pill with navy ring */}
         <motion.div
-          className="absolute top-1/2 -translate-y-1/2 rounded-full shadow"
+          className="absolute top-1/2 -translate-y-1/2 rounded-full shadow-md ring-2 ring-[#1C2C64] bg-white"
           style={{
             x: xSpring,
             width: height * 2,
             height: height * 2,
-            marginLeft: -(height), // center over x
-            background: "#e11d48", // thumb color
-            scaleY: squishSpring, // elastic feel
+            marginLeft: -height, // center over x
+            scaleY: squishSpring,
             scaleX: squishSpring,
           }}
         />
 
-        {/* value bubble */}
+        {/* value bubble — navy chip with white text */}
         <motion.div
-          className="absolute -top-8 rounded-md border bg-background px-2 py-0.5 text-xs"
+          className="absolute -top-8 rounded-md border border-white/10 bg-[#1C2C64] px-2 py-0.5 text-xs text-white"
           style={{ x: xSpring, translateX: "-50%" }}
         >
-          {formatValue(value)}
+          {formatValue(Math.min(value, effectiveMax))}
         </motion.div>
       </div>
     </div>
